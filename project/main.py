@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+import uvicorn
 from contextlib import asynccontextmanager
 from src.utils.db import create_tables
 from src.api import appointments, technicians, webhooks
@@ -10,8 +11,12 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="AI Receptionist API", lifespan=lifespan)
+app = FastAPI(title="AI Receptionist API", docs_url="/api/docs",lifespan=lifespan)
 
+app.include_router(
+    appointments.router,
+    tags=["appointments"]
+)
 
 app.include_router(
     appointments.router,
@@ -35,3 +40,7 @@ app.include_router(
 @app.get("/")
 def health_check():
     return {"status": "ok"}
+
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
