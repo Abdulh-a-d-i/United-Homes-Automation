@@ -10,7 +10,7 @@ router = APIRouter()
 
 
 class VerifyAddressRequest(BaseModel):
-    messy_address: str
+    messy_input: str
 
 
 class VerifyAddressResponse(BaseModel):
@@ -64,7 +64,7 @@ class BookAppointmentResponse(BaseModel):
 
 @router.post("/verify-address", response_model=VerifyAddressResponse)
 def verify_address(request: VerifyAddressRequest):
-    result = geocode_address(request.messy_address)
+    result = geocode_address(request.messy_input)
     if not result:
         raise HTTPException(status_code=400, detail="Address not found")
     
