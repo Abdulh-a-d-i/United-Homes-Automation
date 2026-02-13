@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from src.utils.db import create_tables
-from src.api import appointments, technicians, webhooks
+from src.api import appointments, technicians, webhooks, sync
 
 
 @asynccontextmanager
@@ -29,6 +29,12 @@ app.include_router(
     webhooks.router,
     prefix="/api/webhooks",
     tags=["webhooks"]
+)
+
+app.include_router(
+    sync.router,
+    prefix="/api/sync",
+    tags=["sync"]
 )
 
 
