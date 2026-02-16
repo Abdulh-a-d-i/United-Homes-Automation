@@ -18,11 +18,7 @@ app.include_router(
     tags=["appointments"]
 )
 
-app.include_router(
-    appointments.router,
-    prefix="/api/appointments",
-    tags=["appointments"]
-)
+
 
 app.include_router(
     technicians.router,

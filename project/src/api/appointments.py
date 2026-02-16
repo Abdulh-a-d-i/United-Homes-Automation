@@ -161,7 +161,7 @@ def book_appointment(request: BookAppointmentRequest):
     tech = get_technician(request.technician_id)
     
     if not tech:
-        raise HTTPException(status_code=404, detail="Technician not found")
+        raise HTTPException(status_code=404, detail=f"Technician not found with ID: {request.technician_id}")
     
     end_time = request.start_time + timedelta(minutes=request.duration_minutes)
     
@@ -209,3 +209,147 @@ def book_appointment(request: BookAppointmentRequest):
         time=request.start_time.isoformat(),
         message=f"Appointment booked with {tech['name']} at {request.start_time.isoformat()}"
     )
+
+
+# ============================================================================
+# RETELL AI COMPATIBLE ENDPOINTS
+# ============================================================================
+
+class CheckTechnicianAvailabilityRequest(BaseModel):
+    """Request model matching Retell AI's function call parameters"""
+    requested_time: str  # e.g., "2026-02-14 09:00 AM" or ISO format
+    service_type: str
+    confirmed_address: str
+
+
+class CheckTechnicianAvailabilityResponse(BaseModel):
+    """Response for Retell AI with technician availability"""
+    success: bool
+    available: bool
+    technician_id: int = None
+    technician_name: str = None
+    distance_miles: float = None
+    time_slot: str = None
+    alternative_slots: list = None
+    message: str = None
+
+
+@router.post("/check-technician-availability", response_model=CheckTechnicianAvailabilityResponse)
+def check_technician_availability(request: CheckTechnicianAvailabilityRequest):
+    """
+    Retell AI compatible endpoint for checking technician availability.
+    Accepts: requested_time (string), service_type, confirmed_address
+    Returns: technician_id to use for booking
+    """
+    # Step 1: Geocode the address
+    geocode_result = geocode_address(request.confirmed_address)
+    if not geocode_result:
+        return CheckTechnicianAvailabilityResponse(
+            success=False,
+            available=False,
+            message="Could not verify the address. Please provide a valid address."
+        )
+    
+    # Step 2: Parse the requested time
+    try:
+        # Try parsing common formats
+        requested_datetime = None
+        for fmt in [
+            "%Y-%m-%d %I:%M %p",  # "2026-02-14 09:00 AM"
+            "%Y-%m-%dT%H:%M:%S",  # "2026-02-14T09:00:00"
+            "%Y-%m-%dT%H:%M:%SZ",  # "2026-02-14T09:00:00Z"
+            "%Y-%m-%d %H:%M",  # "2026-02-14 09:00"
+        ]:
+            try:
+                requested_datetime = datetime.strptime(request.requested_time, fmt)
+                break
+            except ValueError:
+                continue
+        
+        if not requested_datetime:
+            # Try ISO format parsing
+            requested_datetime = datetime.fromisoformat(request.requested_time.replace('Z', '+00:00'))
+    except Exception as e:
+        return CheckTechnicianAvailabilityResponse(
+            success=False,
+            available=False,
+            message=f"Invalid time format. Please provide time in format like '2026-02-14 09:00 AM' or ISO format."
+        )
+    
+    # Step 3: Find available technician using existing logic
+    techs = get_techs_with_skill(request.service_type)
+    
+    if not techs:
+        return CheckTechnicianAvailabilityResponse(
+            success=False,
+            available=False,
+            message=f"No technicians available for {request.service_type}"
+        )
+    
+    tech_scores = []
+    
+    for tech in techs:
+        estimated_location = estimate_tech_location(tech["id"], requested_datetime)
+        
+        if not estimated_location:
+            continue
+        
+        distance = calculate_distance(
+            estimated_location["latitude"],
+            estimated_location["longitude"],
+            geocode_result["latitude"],
+            geocode_result["longitude"]
+        )
+        
+        if distance <= tech["max_radius_miles"]:
+            is_available = check_calendar_availability(
+                tech["ghl_calendar_id"],
+                requested_datetime,
+                60
+            )
+            
+            tech_scores.append({
+                "tech": tech,
+                "distance": distance,
+                "available": is_available
+            })
+    
+    # Sort by availability first, then distance
+    tech_scores.sort(key=lambda x: (not x["available"], x["distance"]))
+    
+    if not tech_scores:
+        return CheckTechnicianAvailabilityResponse(
+            success=False,
+            available=False,
+            message="No technicians available within service radius for this location."
+        )
+    
+    best_tech = tech_scores[0]
+    
+    if best_tech["available"]:
+        return CheckTechnicianAvailabilityResponse(
+            success=True,
+            available=True,
+            technician_id=best_tech["tech"]["id"],
+            technician_name=best_tech["tech"]["name"],
+            distance_miles=round(best_tech["distance"], 2),
+            time_slot=requested_datetime.isoformat(),
+            message=f"{best_tech['tech']['name']} is available at {requested_datetime.strftime('%I:%M %p on %B %d, %Y')}"
+        )
+    else:
+        # Generate alternative time slots
+        alternative_slots = []
+        base_time = requested_datetime
+        for i in range(1, 4):
+            alt_time = base_time + timedelta(hours=i)
+            alternative_slots.append(alt_time.isoformat())
+        
+        return CheckTechnicianAvailabilityResponse(
+            success=True,
+            available=False,
+            technician_id=best_tech["tech"]["id"],
+            technician_name=best_tech["tech"]["name"],
+            distance_miles=round(best_tech["distance"], 2),
+            alternative_slots=alternative_slots,
+            message=f"{best_tech['tech']['name']} is not available at the requested time. Alternative times available."
+        )

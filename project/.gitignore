@@ -8,3 +8,6 @@ env.bak/
 venv.bak/
 __pycache__
 seed_data.py
+check_tech_availability.py
+test_check_tech_availability.json
+check_techs.py
