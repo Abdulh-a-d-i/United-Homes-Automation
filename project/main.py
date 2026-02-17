@@ -2,7 +2,7 @@ from fastapi import FastAPI
 import uvicorn
 from contextlib import asynccontextmanager
 from src.utils.db import create_tables
-from src.api import appointments, technicians, webhooks
+from src.api import appointments, technicians, webhooks, sync
 
 
 @asynccontextmanager
@@ -15,9 +15,9 @@ app = FastAPI(title="AI Receptionist API", docs_url="/api/docs",lifespan=lifespa
 
 app.include_router(
     appointments.router,
+    prefix="/api/appointments",
     tags=["appointments"]
 )
-
 
 
 app.include_router(
@@ -30,6 +30,12 @@ app.include_router(
     webhooks.router,
     prefix="/api/webhooks",
     tags=["webhooks"]
+)
+
+app.include_router(
+    sync.router,
+    prefix="/api/sync",
+    tags=["sync"]
 )
 
 

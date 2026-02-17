@@ -77,11 +77,17 @@ def get_technician(tech_id):
 def get_techs_with_skill(service_type):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    # Use partial matching to handle cases like "Gutter Cleaning" matching "Gutter Cleaning & Repair"
     cur.execute("""
         SELECT * FROM technicians 
         WHERE status = 'active' 
-        AND skills @> %s::jsonb
-    """, (f'["{service_type}"]',))
+        AND EXISTS (
+            SELECT 1 FROM jsonb_array_elements_text(skills) AS skill
+            WHERE skill ILIKE %s
+        )
+    """, (f'%{service_type}%',))
+    
     techs = cur.fetchall()
     cur.close()
     conn.close()
@@ -180,3 +186,40 @@ def get_all_technicians():
     cur.close()
     conn.close()
     return [dict(tech) for tech in techs]
+
+
+def get_technician_by_ghl_user_id(ghl_user_id):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute("SELECT * FROM technicians WHERE ghl_user_id = %s", (ghl_user_id,))
+    tech = cur.fetchone()
+    cur.close()
+    conn.close()
+    return dict(tech) if tech else None
+
+
+def upsert_technician_from_ghl(ghl_user_id, ghl_calendar_id, name, email, phone, 
+                               skills=None, home_latitude=None, home_longitude=None):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cur.execute("""
+        INSERT INTO technicians 
+        (ghl_user_id, ghl_calendar_id, name, email, phone, skills, home_latitude, home_longitude)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (ghl_user_id) DO UPDATE SET
+        ghl_calendar_id = EXCLUDED.ghl_calendar_id,
+        name = EXCLUDED.name,
+        email = EXCLUDED.email,
+        phone = EXCLUDED.phone,
+        skills = COALESCE(EXCLUDED.skills, technicians.skills),
+        home_latitude = COALESCE(EXCLUDED.home_latitude, technicians.home_latitude),
+        home_longitude = COALESCE(EXCLUDED.home_longitude, technicians.home_longitude)
+        RETURNING *
+    """, (ghl_user_id, ghl_calendar_id, name, email, phone, skills, home_latitude, home_longitude))
+    
+    tech = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+    return dict(tech) if tech else None

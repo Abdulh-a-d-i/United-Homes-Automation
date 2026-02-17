@@ -23,6 +23,10 @@ def estimate_tech_location(tech_id, target_datetime):
     if not tech:
         return None
     
+    # Convert timezone-aware datetime to naive for comparison with database datetimes
+    if target_datetime.tzinfo is not None:
+        target_datetime = target_datetime.replace(tzinfo=None)
+    
     target_date = target_datetime.date()
     appointments = get_tech_appointments_for_day(tech_id, target_date)
     
