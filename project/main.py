@@ -1,7 +1,12 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from src.utils.db import create_tables
-from src.api import appointments, technicians, webhooks, sync
+from src.api import appointments, technicians, webhooks
+from src.api import auth as auth_router
+from src.api import admin as admin_router
+from src.api import calendar as calendar_router
+from src.api import appointment_management
 
 
 @asynccontextmanager
@@ -10,8 +15,39 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="AI Receptionist API", lifespan=lifespan)
+app = FastAPI(title="United Home Services API", lifespan=lifespan)
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(
+    auth_router.router,
+    prefix="/api/auth",
+    tags=["auth"]
+)
+
+app.include_router(
+    admin_router.router,
+    prefix="/api/admin",
+    tags=["admin"]
+)
+
+app.include_router(
+    calendar_router.router,
+    prefix="/api/calendar",
+    tags=["calendar"]
+)
+
+app.include_router(
+    appointment_management.router,
+    prefix="/api/appointment-management",
+    tags=["appointment-management"]
+)
 
 app.include_router(
     appointments.router,
@@ -31,11 +67,13 @@ app.include_router(
     tags=["webhooks"]
 )
 
-app.include_router(
-    sync.router,
-    prefix="/api/sync",
-    tags=["sync"]
-)
+# GHL sync router commented out
+# from src.api import sync
+# app.include_router(
+#     sync.router,
+#     prefix="/api/sync",
+#     tags=["sync"]
+# )
 
 
 @app.get("/")

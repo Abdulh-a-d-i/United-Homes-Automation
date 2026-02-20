@@ -1,0 +1,408 @@
+{
+    "agent_name": "United Home Services - Fixed Tools",
+    "channel": "voice",
+    "response_engine": {
+        "type": "conversation-flow",
+        "version": 0
+    },
+    "language": "en-US",
+    "data_storage_setting": "everything",
+    "opt_in_signed_url": false,
+    "version": 0,
+    "is_published": false,
+    "post_call_analysis_model": "gpt-4.1-mini",
+    "pii_config": {
+        "mode": "post_call",
+        "categories": []
+    },
+    "voice_id": "11labs-Andrew",
+    "max_call_duration_ms": 3600000,
+    "interruption_sensitivity": 0.9,
+    "allow_user_dtmf": true,
+    "user_dtmf_options": {},
+    "conversationFlow": {
+        "version": 0,
+        "global_prompt": "You are a professional AI receptionist for United Home Services.\n\nCRITICAL RULES:\n1. When user gives address → CALL verify_address immediately\n2. SAVE the latitude, longitude, formatted_address from response\n3. When checking availability → USE saved lat/lon\n4. When booking → USE ALL saved data\n\nSERVICES: Chimney ($249), Dryer Vent ($149), Gutter ($199), Power Washing ($299), Air Duct ($399)",
+        "nodes": [
+            {
+                "instruction": {
+                    "type": "prompt",
+                    "text": "Greet customer and ask what service they need."
+                },
+                "model_choice": {
+                    "type": "cascading",
+                    "model": "gemini-3.0-flash",
+                    "high_priority": false
+                },
+                "name": "Root_State",
+                "edges": [
+                    {
+                        "destination_node_id": "sales-node",
+                        "id": "edge-1",
+                        "transition_condition": {
+                            "type": "prompt",
+                            "prompt": "New booking"
+                        }
+                    }
+                ],
+                "start_speaker": "agent",
+                "id": "start-node",
+                "type": "conversation",
+                "display_position": {
+                    "x": 100,
+                    "y": 100
+                }
+            },
+            {
+                "instruction": {
+                    "type": "prompt",
+                    "text": "Get service type and address. Call verify_address tool immediately."
+                },
+                "model_choice": {
+                    "type": "cascading",
+                    "model": "gemini-3.0-flash",
+                    "high_priority": false
+                },
+                "name": "Sales_State",
+                "edges": [
+                    {
+                        "destination_node_id": "verify-node",
+                        "id": "edge-2",
+                        "transition_condition": {
+                            "type": "prompt",
+                            "prompt": "User provided address"
+                        }
+                    },
+                    {
+                        "destination_node_id": "availability-node",
+                        "id": "edge-3",
+                        "transition_condition": {
+                            "type": "prompt",
+                            "prompt": "Address confirmed"
+                        }
+                    }
+                ],
+                "id": "sales-node",
+                "knowledge_base_ids": [],
+                "type": "conversation",
+                "display_position": {
+                    "x": 400,
+                    "y": 100
+                }
+            },
+            {
+                "tool_id": "tool-verify",
+                "else_edge": {
+                    "destination_node_id": "sales-node",
+                    "id": "verify-else",
+                    "transition_condition": {
+                        "type": "prompt",
+                        "prompt": "Else"
+                    }
+                },
+                "name": "verify_address",
+                "edges": [],
+                "id": "verify-node",
+                "type": "function",
+                "tool_type": "local",
+                "speak_during_execution": true,
+                "display_position": {
+                    "x": 400,
+                    "y": 300
+                },
+                "wait_for_result": true
+            },
+            {
+                "instruction": {
+                    "type": "prompt",
+                    "text": "Ask when they want service. Call check_technician_availability."
+                },
+                "model_choice": {
+                    "type": "cascading",
+                    "model": "gemini-3.0-flash",
+                    "high_priority": false
+                },
+                "name": "Availability_State",
+                "edges": [
+                    {
+                        "destination_node_id": "check-node",
+                        "id": "edge-4",
+                        "transition_condition": {
+                            "type": "prompt",
+                            "prompt": "Check availability"
+                        }
+                    },
+                    {
+                        "destination_node_id": "book-node",
+                        "id": "edge-5",
+                        "transition_condition": {
+                            "type": "prompt",
+                            "prompt": "Time agreed"
+                        }
+                    }
+                ],
+                "id": "availability-node",
+                "type": "conversation",
+                "display_position": {
+                    "x": 700,
+                    "y": 100
+                }
+            },
+            {
+                "tool_id": "tool-check",
+                "else_edge": {
+                    "destination_node_id": "availability-node",
+                    "id": "check-else",
+                    "transition_condition": {
+                        "type": "prompt",
+                        "prompt": "Else"
+                    }
+                },
+                "name": "check_technician_availability",
+                "edges": [],
+                "id": "check-node",
+                "type": "function",
+                "tool_type": "local",
+                "speak_during_execution": true,
+                "display_position": {
+                    "x": 700,
+                    "y": 300
+                },
+                "wait_for_result": true
+            },
+            {
+                "instruction": {
+                    "type": "prompt",
+                    "text": "Get customer details. Call book_appointment."
+                },
+                "model_choice": {
+                    "type": "cascading",
+                    "model": "gemini-3.0-flash",
+                    "high_priority": false
+                },
+                "name": "Book_State",
+                "edges": [
+                    {
+                        "destination_node_id": "book-execute-node",
+                        "id": "edge-6",
+                        "transition_condition": {
+                            "type": "prompt",
+                            "prompt": "Execute booking"
+                        }
+                    },
+                    {
+                        "destination_node_id": "end-node",
+                        "id": "edge-7",
+                        "transition_condition": {
+                            "type": "prompt",
+                            "prompt": "Done"
+                        }
+                    }
+                ],
+                "id": "book-node",
+                "type": "conversation",
+                "display_position": {
+                    "x": 1000,
+                    "y": 100
+                }
+            },
+            {
+                "tool_id": "tool-book",
+                "else_edge": {
+                    "destination_node_id": "end-node",
+                    "id": "book-else",
+                    "transition_condition": {
+                        "type": "prompt",
+                        "prompt": "Else"
+                    }
+                },
+                "name": "book_appointment",
+                "edges": [],
+                "id": "book-execute-node",
+                "type": "function",
+                "tool_type": "local",
+                "speak_during_execution": true,
+                "display_position": {
+                    "x": 1000,
+                    "y": 300
+                },
+                "wait_for_result": true
+            },
+            {
+                "name": "End Call",
+                "id": "end-node",
+                "type": "end",
+                "display_position": {
+                    "x": 1300,
+                    "y": 100
+                },
+                "instruction": {
+                    "type": "prompt",
+                    "text": "End call"
+                }
+            }
+        ],
+        "start_node_id": "start-node",
+        "start_speaker": "agent",
+        "tools": [
+            {
+                "headers": {
+                    "Content-Type": "application/json"
+                },
+                "parameter_type": "form",
+                "method": "POST",
+                "query_params": {},
+                "description": "Verifies address. Returns formatted_address, latitude, longitude.",
+                "type": "custom",
+                "url": "https://wholly-centuried-francis.ngrok-free.dev/api/appointments/verify-address",
+                "tool_id": "tool-verify",
+                "args_at_root": true,
+                "timeout_ms": 15000,
+                "name": "verify_address",
+                "response_variables": {
+                    "formatted_address": "$.formatted_address",
+                    "latitude": "$.latitude",
+                    "longitude": "$.longitude"
+                },
+                "parameters": {
+                    "type": "object",
+                    "required": [
+                        "messy_input"
+                    ],
+                    "properties": {
+                        "messy_input": {
+                            "type": "string",
+                            "description": "Raw address"
+                        }
+                    }
+                }
+            },
+            {
+                "headers": {
+                    "Content-Type": "application/json"
+                },
+                "parameter_type": "form",
+                "method": "POST",
+                "query_params": {},
+                "description": "Checks availability. Use lat/lon from verify_address.",
+                "type": "custom",
+                "url": "https://wholly-centuried-francis.ngrok-free.dev/api/appointments/find-technician-availability",
+                "tool_id": "tool-check",
+                "args_at_root": true,
+                "timeout_ms": 15000,
+                "name": "check_technician_availability",
+                "response_variables": {
+                    "technician_id": "$.technician.id",
+                    "technician_name": "$.technician.name",
+                    "time_slot": "$.time_slot"
+                },
+                "parameters": {
+                    "type": "object",
+                    "required": [
+                        "service_type",
+                        "confirmed_latitude",
+                        "confirmed_longitude",
+                        "requested_datetime"
+                    ],
+                    "properties": {
+                        "service_type": {
+                            "type": "string"
+                        },
+                        "confirmed_latitude": {
+                            "type": "number"
+                        },
+                        "confirmed_longitude": {
+                            "type": "number"
+                        },
+                        "requested_datetime": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            {
+                "headers": {
+                    "Content-Type": "application/json"
+                },
+                "parameter_type": "form",
+                "method": "POST",
+                "query_params": {},
+                "description": "Books appointment with all saved data.",
+                "type": "custom",
+                "url": "https://wholly-centuried-francis.ngrok-free.dev/api/appointments/book-appointment",
+                "tool_id": "tool-book",
+                "args_at_root": true,
+                "timeout_ms": 20000,
+                "name": "book_appointment",
+                "response_variables": {
+                    "appointment_id": "$.appointment_id"
+                },
+                "parameters": {
+                    "type": "object",
+                    "required": [
+                        "customer_name",
+                        "customer_phone",
+                        "customer_email",
+                        "technician_id",
+                        "service_type",
+                        "address",
+                        "latitude",
+                        "longitude",
+                        "start_time",
+                        "duration_minutes"
+                    ],
+                    "properties": {
+                        "customer_name": {
+                            "type": "string"
+                        },
+                        "customer_phone": {
+                            "type": "string"
+                        },
+                        "customer_email": {
+                            "type": "string"
+                        },
+                        "technician_id": {
+                            "type": "number"
+                        },
+                        "service_type": {
+                            "type": "string"
+                        },
+                        "address": {
+                            "type": "string"
+                        },
+                        "latitude": {
+                            "type": "number"
+                        },
+                        "longitude": {
+                            "type": "number"
+                        },
+                        "start_time": {
+                            "type": "string"
+                        },
+                        "duration_minutes": {
+                            "type": "number"
+                        }
+                    }
+                }
+            }
+        ],
+        "model_choice": {
+            "type": "cascading",
+            "model": "gemini-3.0-flash",
+            "high_priority": false
+        },
+        "tool_call_strict_mode": true,
+        "knowledge_base_ids": [],
+        "kb_config": {
+            "top_k": 3,
+            "filter_score": 0.6
+        },
+        "begin_tag_display_position": {
+            "x": 0,
+            "y": 0
+        },
+        "is_published": false,
+        "flex_mode": false
+    },
+    "begin_message": "Hi, thank you for calling United Home Services! How can I help you today?"
+}

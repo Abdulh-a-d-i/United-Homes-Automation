@@ -1,4 +1,7 @@
 import os
+import json
+import bcrypt
+import logging
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
@@ -13,12 +16,27 @@ def get_db_connection():
 def create_tables():
     conn = get_db_connection()
     cur = conn.cursor()
-    
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            username VARCHAR(255) UNIQUE NOT NULL,
+            email VARCHAR(255) UNIQUE NOT NULL,
+            password_hash VARCHAR(255) NOT NULL,
+            first_name VARCHAR(255),
+            last_name VARCHAR(255),
+            phone VARCHAR(50),
+            is_admin BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS technicians (
             id SERIAL PRIMARY KEY,
-            ghl_user_id VARCHAR(255) UNIQUE,
-            ghl_calendar_id VARCHAR(255) UNIQUE,
+            ghl_user_id VARCHAR(255),
+            ghl_calendar_id VARCHAR(255),
+            user_id INTEGER REFERENCES users(id),
             name VARCHAR(255),
             email VARCHAR(255),
             phone VARCHAR(50),
@@ -26,11 +44,38 @@ def create_tables():
             home_latitude DECIMAL(10, 8),
             home_longitude DECIMAL(11, 8),
             max_radius_miles INTEGER DEFAULT 20,
+            calendar_provider VARCHAR(50),
+            calendar_email VARCHAR(255),
+            calendar_credentials JSONB,
+            calendar_connected BOOLEAN DEFAULT FALSE,
             status VARCHAR(50) DEFAULT 'active',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS appointments (
+            id SERIAL PRIMARY KEY,
+            calendar_event_id VARCHAR(255),
+            technician_id INTEGER REFERENCES technicians(id),
+            customer_name VARCHAR(255),
+            customer_phone VARCHAR(50),
+            customer_email VARCHAR(255),
+            service_type VARCHAR(255),
+            address TEXT,
+            latitude DECIMAL(10, 8),
+            longitude DECIMAL(11, 8),
+            start_time TIMESTAMP,
+            end_time TIMESTAMP,
+            duration_minutes INTEGER DEFAULT 60,
+            status VARCHAR(50) DEFAULT 'scheduled',
+            notes TEXT,
+            reminder_sent BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS appointments_cache (
             id SERIAL PRIMARY KEY,
@@ -48,7 +93,7 @@ def create_tables():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS route_cache (
             id SERIAL PRIMARY KEY,
@@ -58,162 +103,711 @@ def create_tables():
             last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    
+
+    _ensure_schema_migration(cur)
+
     conn.commit()
     cur.close()
     conn.close()
+
+    _seed_admin_user()
+
+
+def _ensure_schema_migration(cur):
+    columns_to_add = {
+        "technicians": [
+            ("user_id", "INTEGER REFERENCES users(id)"),
+            ("calendar_provider", "VARCHAR(50)"),
+            ("calendar_email", "VARCHAR(255)"),
+            ("calendar_credentials", "JSONB"),
+            ("calendar_connected", "BOOLEAN DEFAULT FALSE"),
+        ]
+    }
+    for table, columns in columns_to_add.items():
+        for col_name, col_type in columns:
+            try:
+                cur.execute(f"""
+                    ALTER TABLE {table}
+                    ADD COLUMN IF NOT EXISTS {col_name} {col_type}
+                """)
+            except Exception:
+                pass
+
+
+def _seed_admin_user():
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT id FROM users WHERE is_admin = TRUE LIMIT 1")
+        if cur.fetchone():
+            cur.close()
+            conn.close()
+            return
+        admin_email = os.getenv("ADMIN_EMAIL", "admin@unitedhomeservices.com")
+        admin_password = os.getenv("ADMIN_PASSWORD", "admin123456")
+        hashed = bcrypt.hashpw(admin_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        cur.execute("""
+            INSERT INTO users (username, email, password_hash, first_name, is_admin)
+            VALUES (%s, %s, %s, %s, TRUE)
+            ON CONFLICT (email) DO NOTHING
+        """, ("admin", admin_email, hashed, "Admin"))
+        conn.commit()
+        cur.close()
+        conn.close()
+        logging.info(f"Admin user seeded: {admin_email}")
+    except Exception as e:
+        logging.error(f"Error seeding admin: {e}")
+
+
+def register_user(user_data):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("SELECT id FROM users WHERE email = %s", (user_data["email"],))
+        if cur.fetchone():
+            raise ValueError("Email already registered")
+        cur.execute("SELECT id FROM users WHERE username = %s", (user_data["username"],))
+        if cur.fetchone():
+            raise ValueError("Username already taken")
+        hashed = bcrypt.hashpw(
+            user_data["password"].encode("utf-8"),
+            bcrypt.gensalt()
+        ).decode("utf-8")
+        cur.execute("""
+            INSERT INTO users (username, email, password_hash)
+            VALUES (%s, %s, %s)
+            RETURNING id, username, email, created_at
+        """, (user_data["username"], user_data["email"], hashed))
+        user = cur.fetchone()
+        conn.commit()
+        return dict(user) if user else None
+    finally:
+        cur.close()
+        conn.close()
+
+
+def login_user(user_data):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("""
+            SELECT id, username, email, password_hash, first_name, last_name,
+                   phone, is_admin, created_at
+            FROM users WHERE email = %s
+        """, (user_data["email"],))
+        user = cur.fetchone()
+        if not user:
+            return None
+        if not bcrypt.checkpw(
+            user_data["password"].encode("utf-8"),
+            user["password_hash"].encode("utf-8")
+        ):
+            return None
+        user = dict(user)
+        del user["password_hash"]
+        return user
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_user_by_id(user_id):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("""
+            SELECT id, username, email, first_name, last_name,
+                   phone, is_admin, created_at
+            FROM users WHERE id = %s
+        """, (user_id,))
+        user = cur.fetchone()
+        return dict(user) if user else None
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_all_users_paginated(page=1, page_size=20, search=None):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        offset = (page - 1) * page_size
+        if search:
+            search_pattern = f"%{search}%"
+            cur.execute("""
+                SELECT u.id, u.username, u.email, u.first_name, u.last_name,
+                       u.phone, u.is_admin, u.created_at,
+                       t.id as technician_id, t.skills, t.calendar_connected,
+                       t.calendar_provider, t.calendar_email
+                FROM users u
+                LEFT JOIN technicians t ON t.user_id = u.id
+                WHERE u.username ILIKE %s OR u.email ILIKE %s
+                   OR u.first_name ILIKE %s OR u.last_name ILIKE %s
+                ORDER BY u.created_at DESC
+                LIMIT %s OFFSET %s
+            """, (search_pattern, search_pattern, search_pattern, search_pattern,
+                  page_size, offset))
+        else:
+            cur.execute("""
+                SELECT u.id, u.username, u.email, u.first_name, u.last_name,
+                       u.phone, u.is_admin, u.created_at,
+                       t.id as technician_id, t.skills, t.calendar_connected,
+                       t.calendar_provider, t.calendar_email
+                FROM users u
+                LEFT JOIN technicians t ON t.user_id = u.id
+                ORDER BY u.created_at DESC
+                LIMIT %s OFFSET %s
+            """, (page_size, offset))
+        users = cur.fetchall()
+
+        count_query = "SELECT COUNT(*) FROM users"
+        if search:
+            count_query += " WHERE username ILIKE %s OR email ILIKE %s"
+            cur.execute(count_query, (search_pattern, search_pattern))
+        else:
+            cur.execute(count_query)
+        total = cur.fetchone()["count"]
+
+        return {
+            "users": [dict(u) for u in users],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": (total + page_size - 1) // page_size
+        }
+    finally:
+        cur.close()
+        conn.close()
+
+
+def create_user_by_admin(user_data, temp_password):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("SELECT id FROM users WHERE email = %s", (user_data["email"],))
+        if cur.fetchone():
+            raise ValueError("Email already registered")
+        hashed = bcrypt.hashpw(
+            temp_password.encode("utf-8"),
+            bcrypt.gensalt()
+        ).decode("utf-8")
+        cur.execute("""
+            INSERT INTO users (username, email, password_hash, first_name, last_name, phone)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id, username, email, first_name, last_name, phone, created_at
+        """, (
+            user_data["username"],
+            user_data["email"],
+            hashed,
+            user_data.get("first_name"),
+            user_data.get("last_name"),
+            user_data.get("phone")
+        ))
+        user = cur.fetchone()
+
+        if user and user_data.get("skills"):
+            skills_json = json.dumps(user_data["skills"])
+            cur.execute("""
+                INSERT INTO technicians (user_id, name, email, phone, skills, status)
+                VALUES (%s, %s, %s, %s, %s::jsonb, 'active')
+                RETURNING id
+            """, (
+                user["id"],
+                f"{user_data.get('first_name', '')} {user_data.get('last_name', '')}".strip() or user_data["username"],
+                user_data["email"],
+                user_data.get("phone"),
+                skills_json
+            ))
+
+        conn.commit()
+        return dict(user) if user else None
+    finally:
+        cur.close()
+        conn.close()
+
+
+def update_user_password(email, new_password):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        hashed = bcrypt.hashpw(
+            new_password.encode("utf-8"),
+            bcrypt.gensalt()
+        ).decode("utf-8")
+        cur.execute("""
+            UPDATE users SET password_hash = %s WHERE email = %s
+        """, (hashed, email))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_user_detail_with_calendar(user_id):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("""
+            SELECT u.id, u.username, u.email, u.first_name, u.last_name,
+                   u.phone, u.is_admin, u.created_at,
+                   t.id as technician_id, t.skills, t.calendar_connected,
+                   t.calendar_provider, t.calendar_email
+            FROM users u
+            LEFT JOIN technicians t ON t.user_id = u.id
+            WHERE u.id = %s
+        """, (user_id,))
+        user = cur.fetchone()
+        return dict(user) if user else None
+    finally:
+        cur.close()
+        conn.close()
+
+
+def update_user(user_id, updates):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        user_fields = {}
+        tech_fields = {}
+        for key in ["first_name", "last_name", "phone"]:
+            if key in updates and updates[key] is not None:
+                user_fields[key] = updates[key]
+        if "skills" in updates:
+            tech_fields["skills"] = json.dumps(updates["skills"])
+
+        if user_fields:
+            set_clause = ", ".join(f"{k} = %s" for k in user_fields)
+            values = list(user_fields.values()) + [user_id]
+            cur.execute(f"UPDATE users SET {set_clause} WHERE id = %s", values)
+
+        if tech_fields:
+            cur.execute("SELECT id FROM technicians WHERE user_id = %s", (user_id,))
+            tech = cur.fetchone()
+            if tech:
+                cur.execute(
+                    "UPDATE technicians SET skills = %s::jsonb WHERE user_id = %s",
+                    (tech_fields["skills"], user_id)
+                )
+
+        conn.commit()
+        return get_user_detail_with_calendar(user_id)
+    finally:
+        cur.close()
+        conn.close()
+
+
+def save_calendar_credentials(tech_id, provider, email, credentials):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            UPDATE technicians
+            SET calendar_provider = %s,
+                calendar_email = %s,
+                calendar_credentials = %s::jsonb,
+                calendar_connected = TRUE
+            WHERE id = %s
+        """, (provider, email, json.dumps(credentials), tech_id))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_calendar_credentials(tech_id):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("""
+            SELECT calendar_provider, calendar_email, calendar_credentials, calendar_connected
+            FROM technicians WHERE id = %s
+        """, (tech_id,))
+        result = cur.fetchone()
+        return dict(result) if result else None
+    finally:
+        cur.close()
+        conn.close()
+
+
+def disconnect_calendar(tech_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            UPDATE technicians
+            SET calendar_provider = NULL,
+                calendar_email = NULL,
+                calendar_credentials = NULL,
+                calendar_connected = FALSE
+            WHERE id = %s
+        """, (tech_id,))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        cur.close()
+        conn.close()
+
+
+def create_appointment(appointment_data):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("""
+            INSERT INTO appointments
+            (calendar_event_id, technician_id, customer_name, customer_phone,
+             customer_email, service_type, address, latitude, longitude,
+             start_time, end_time, duration_minutes, status, notes)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING *
+        """, (
+            appointment_data.get("calendar_event_id"),
+            appointment_data["technician_id"],
+            appointment_data["customer_name"],
+            appointment_data.get("customer_phone"),
+            appointment_data.get("customer_email"),
+            appointment_data["service_type"],
+            appointment_data.get("address"),
+            appointment_data.get("latitude"),
+            appointment_data.get("longitude"),
+            appointment_data["start_time"],
+            appointment_data["end_time"],
+            appointment_data.get("duration_minutes", 60),
+            appointment_data.get("status", "scheduled"),
+            appointment_data.get("notes")
+        ))
+        appt = cur.fetchone()
+        conn.commit()
+        return dict(appt) if appt else None
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_appointments_paginated(page=1, page_size=20, technician_id=None,
+                                status_filter=None, date_from=None, date_to=None,
+                                search=None, time_filter=None):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        offset = (page - 1) * page_size
+        conditions = []
+        params = []
+
+        if technician_id:
+            conditions.append("a.technician_id = %s")
+            params.append(technician_id)
+        if status_filter:
+            conditions.append("a.status = %s")
+            params.append(status_filter)
+        if date_from:
+            conditions.append("a.start_time >= %s")
+            params.append(date_from)
+        if date_to:
+            conditions.append("a.start_time <= %s")
+            params.append(date_to)
+        if search:
+            conditions.append(
+                "(a.customer_name ILIKE %s OR a.customer_phone ILIKE %s OR a.customer_email ILIKE %s)"
+            )
+            pattern = f"%{search}%"
+            params.extend([pattern, pattern, pattern])
+        if time_filter == "upcoming":
+            conditions.append("a.start_time > NOW()")
+        elif time_filter == "past":
+            conditions.append("a.start_time <= NOW()")
+
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+        cur.execute(f"""
+            SELECT a.*, t.name as technician_name
+            FROM appointments a
+            LEFT JOIN technicians t ON a.technician_id = t.id
+            WHERE {where_clause}
+            ORDER BY a.start_time DESC
+            LIMIT %s OFFSET %s
+        """, params + [page_size, offset])
+        appointments = cur.fetchall()
+
+        cur.execute(f"""
+            SELECT COUNT(*) FROM appointments a WHERE {where_clause}
+        """, params)
+        total = cur.fetchone()["count"]
+
+        return {
+            "appointments": [dict(a) for a in appointments],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": (total + page_size - 1) // page_size
+        }
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_appointment_by_id(appointment_id):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("""
+            SELECT a.*, t.name as technician_name
+            FROM appointments a
+            LEFT JOIN technicians t ON a.technician_id = t.id
+            WHERE a.id = %s
+        """, (appointment_id,))
+        appt = cur.fetchone()
+        return dict(appt) if appt else None
+    finally:
+        cur.close()
+        conn.close()
+
+
+def update_appointment_status(appointment_id, status):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            UPDATE appointments
+            SET status = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+        """, (status, appointment_id))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_appointment_stats():
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("""
+            SELECT
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE status = 'scheduled') as scheduled,
+                COUNT(*) FILTER (WHERE status = 'completed') as completed,
+                COUNT(*) FILTER (WHERE status = 'cancelled') as cancelled,
+                COUNT(*) FILTER (WHERE status = 'no_show') as no_show,
+                COUNT(*) FILTER (WHERE start_time > NOW() AND status = 'scheduled') as upcoming
+            FROM appointments
+        """)
+        return dict(cur.fetchone())
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_pending_reminders(hours_before=2):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("""
+            SELECT a.*, t.name as technician_name
+            FROM appointments a
+            LEFT JOIN technicians t ON a.technician_id = t.id
+            WHERE a.status = 'scheduled'
+              AND a.reminder_sent = FALSE
+              AND a.start_time BETWEEN NOW() AND NOW() + INTERVAL '%s hours'
+        """, (hours_before,))
+        return [dict(a) for a in cur.fetchall()]
+    finally:
+        cur.close()
+        conn.close()
+
+
+def mark_reminder_sent(appointment_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            UPDATE appointments SET reminder_sent = TRUE WHERE id = %s
+        """, (appointment_id,))
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
 
 
 def get_technician(tech_id):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
-    cur.execute("SELECT * FROM technicians WHERE id = %s", (tech_id,))
-    tech = cur.fetchone()
-    cur.close()
-    conn.close()
-    return dict(tech) if tech else None
+    try:
+        cur.execute("SELECT * FROM technicians WHERE id = %s", (tech_id,))
+        tech = cur.fetchone()
+        return dict(tech) if tech else None
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_technician_by_user_id(user_id):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("SELECT * FROM technicians WHERE user_id = %s", (user_id,))
+        tech = cur.fetchone()
+        return dict(tech) if tech else None
+    finally:
+        cur.close()
+        conn.close()
 
 
 def get_techs_with_skill(service_type):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
-    cur.execute("""
-        SELECT * FROM technicians 
-        WHERE status = 'active' 
-        AND skills @> %s::jsonb
-    """, (f'["{service_type}"]',))
-    techs = cur.fetchall()
-    cur.close()
-    conn.close()
-    return [dict(tech) for tech in techs]
+    try:
+        cur.execute("""
+            SELECT * FROM technicians
+            WHERE status = 'active'
+            AND skills @> %s::jsonb
+        """, (f'["{service_type}"]',))
+        return [dict(tech) for tech in cur.fetchall()]
+    finally:
+        cur.close()
+        conn.close()
 
 
 def get_tech_appointments_for_day(tech_id, date):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
-    cur.execute("""
-        SELECT * FROM appointments_cache 
-        WHERE technician_id = %s 
-        AND DATE(start_time) = %s 
-        ORDER BY start_time
-    """, (tech_id, date))
-    appointments = cur.fetchall()
-    cur.close()
-    conn.close()
-    return [dict(appt) for appt in appointments]
+    try:
+        cur.execute("""
+            SELECT * FROM appointments
+            WHERE technician_id = %s
+            AND DATE(start_time) = %s
+            ORDER BY start_time
+        """, (tech_id, date))
+        return [dict(appt) for appt in cur.fetchall()]
+    finally:
+        cur.close()
+        conn.close()
 
 
-def insert_appointment_cache(ghl_appointment_id, technician_id, customer_name, 
-                            customer_phone, service_type, address, latitude, 
+def insert_appointment_cache(ghl_appointment_id, technician_id, customer_name,
+                            customer_phone, service_type, address, latitude,
                             longitude, start_time, end_time, status):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO appointments_cache 
-        (ghl_appointment_id, technician_id, customer_name, customer_phone, 
-         service_type, address, latitude, longitude, start_time, end_time, status)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (ghl_appointment_id) DO UPDATE SET
-        technician_id = EXCLUDED.technician_id,
-        customer_name = EXCLUDED.customer_name,
-        customer_phone = EXCLUDED.customer_phone,
-        service_type = EXCLUDED.service_type,
-        address = EXCLUDED.address,
-        latitude = EXCLUDED.latitude,
-        longitude = EXCLUDED.longitude,
-        start_time = EXCLUDED.start_time,
-        end_time = EXCLUDED.end_time,
-        status = EXCLUDED.status
-    """, (ghl_appointment_id, technician_id, customer_name, customer_phone, 
-          service_type, address, latitude, longitude, start_time, end_time, status))
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        cur.execute("""
+            INSERT INTO appointments_cache
+            (ghl_appointment_id, technician_id, customer_name, customer_phone,
+             service_type, address, latitude, longitude, start_time, end_time, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (ghl_appointment_id) DO UPDATE SET
+            technician_id = EXCLUDED.technician_id,
+            customer_name = EXCLUDED.customer_name,
+            customer_phone = EXCLUDED.customer_phone,
+            service_type = EXCLUDED.service_type,
+            address = EXCLUDED.address,
+            latitude = EXCLUDED.latitude,
+            longitude = EXCLUDED.longitude,
+            start_time = EXCLUDED.start_time,
+            end_time = EXCLUDED.end_time,
+            status = EXCLUDED.status
+        """, (ghl_appointment_id, technician_id, customer_name, customer_phone,
+              service_type, address, latitude, longitude, start_time, end_time, status))
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
 
 
 def delete_appointment_cache(ghl_appointment_id):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("DELETE FROM appointments_cache WHERE ghl_appointment_id = %s", 
-                (ghl_appointment_id,))
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        cur.execute("DELETE FROM appointments_cache WHERE ghl_appointment_id = %s",
+                    (ghl_appointment_id,))
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
 
 
 def delete_route_cache(tech_id, date):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("""
-        DELETE FROM route_cache 
-        WHERE technician_id = %s AND date = %s
-    """, (tech_id, date))
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        cur.execute("""
+            DELETE FROM route_cache
+            WHERE technician_id = %s AND date = %s
+        """, (tech_id, date))
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
 
 
-def insert_technician(name, email, phone, skills, home_latitude, home_longitude, 
-                     ghl_user_id, ghl_calendar_id):
+def insert_technician(name, email, phone, skills, home_latitude, home_longitude,
+                     ghl_user_id=None, ghl_calendar_id=None, user_id=None):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
-    cur.execute("""
-        INSERT INTO technicians 
-        (name, email, phone, skills, home_latitude, home_longitude, 
-         ghl_user_id, ghl_calendar_id)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        RETURNING *
-    """, (name, email, phone, skills, home_latitude, home_longitude, 
-          ghl_user_id, ghl_calendar_id))
-    tech = cur.fetchone()
-    conn.commit()
-    cur.close()
-    conn.close()
-    return dict(tech) if tech else None
+    try:
+        cur.execute("""
+            INSERT INTO technicians
+            (name, email, phone, skills, home_latitude, home_longitude,
+             ghl_user_id, ghl_calendar_id, user_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING *
+        """, (name, email, phone, skills, home_latitude, home_longitude,
+              ghl_user_id, ghl_calendar_id, user_id))
+        tech = cur.fetchone()
+        conn.commit()
+        return dict(tech) if tech else None
+    finally:
+        cur.close()
+        conn.close()
 
 
 def get_all_technicians():
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
-    cur.execute("SELECT * FROM technicians WHERE status = 'active'")
-    techs = cur.fetchall()
-    cur.close()
-    conn.close()
-    return [dict(tech) for tech in techs]
+    try:
+        cur.execute("SELECT * FROM technicians WHERE status = 'active'")
+        return [dict(tech) for tech in cur.fetchall()]
+    finally:
+        cur.close()
+        conn.close()
 
 
 def get_technician_by_ghl_user_id(ghl_user_id):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
-    cur.execute("SELECT * FROM technicians WHERE ghl_user_id = %s", (ghl_user_id,))
-    tech = cur.fetchone()
-    cur.close()
-    conn.close()
-    return dict(tech) if tech else None
+    try:
+        cur.execute("SELECT * FROM technicians WHERE ghl_user_id = %s", (ghl_user_id,))
+        tech = cur.fetchone()
+        return dict(tech) if tech else None
+    finally:
+        cur.close()
+        conn.close()
 
 
-def upsert_technician_from_ghl(ghl_user_id, ghl_calendar_id, name, email, phone, 
+def upsert_technician_from_ghl(ghl_user_id, ghl_calendar_id, name, email, phone,
                                skills=None, home_latitude=None, home_longitude=None):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
-    
-    cur.execute("""
-        INSERT INTO technicians 
-        (ghl_user_id, ghl_calendar_id, name, email, phone, skills, home_latitude, home_longitude)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (ghl_user_id) DO UPDATE SET
-        ghl_calendar_id = EXCLUDED.ghl_calendar_id,
-        name = EXCLUDED.name,
-        email = EXCLUDED.email,
-        phone = EXCLUDED.phone,
-        skills = COALESCE(EXCLUDED.skills, technicians.skills),
-        home_latitude = COALESCE(EXCLUDED.home_latitude, technicians.home_latitude),
-        home_longitude = COALESCE(EXCLUDED.home_longitude, technicians.home_longitude)
-        RETURNING *
-    """, (ghl_user_id, ghl_calendar_id, name, email, phone, skills, home_latitude, home_longitude))
-    
-    tech = cur.fetchone()
-    conn.commit()
-    cur.close()
-    conn.close()
-    return dict(tech) if tech else None
+    try:
+        cur.execute("""
+            INSERT INTO technicians
+            (ghl_user_id, ghl_calendar_id, name, email, phone, skills, home_latitude, home_longitude)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (ghl_user_id) DO UPDATE SET
+            ghl_calendar_id = EXCLUDED.ghl_calendar_id,
+            name = EXCLUDED.name,
+            email = EXCLUDED.email,
+            phone = EXCLUDED.phone,
+            skills = COALESCE(EXCLUDED.skills, technicians.skills),
+            home_latitude = COALESCE(EXCLUDED.home_latitude, technicians.home_latitude),
+            home_longitude = COALESCE(EXCLUDED.home_longitude, technicians.home_longitude)
+            RETURNING *
+        """, (ghl_user_id, ghl_calendar_id, name, email, phone, skills, home_latitude, home_longitude))
+        tech = cur.fetchone()
+        conn.commit()
+        return dict(tech) if tech else None
+    finally:
+        cur.close()
+        conn.close()
