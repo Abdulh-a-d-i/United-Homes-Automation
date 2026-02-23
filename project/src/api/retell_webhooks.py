@@ -1,8 +1,6 @@
 import os
 import logging
 import traceback
-import hmac
-import hashlib
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse
 from src.utils.db import upsert_call_log
@@ -15,26 +13,27 @@ router = APIRouter()
 RETELL_API_KEY = os.getenv("RETELL_API_KEY", "")
 
 
-def verify_retell_signature(payload_bytes: bytes, signature: str) -> bool:
-    if not RETELL_API_KEY or not signature:
-        return False
-    computed = hmac.new(
-        RETELL_API_KEY.encode("utf-8"),
-        payload_bytes,
-        hashlib.sha256
-    ).hexdigest()
-    return hmac.compare_digest(computed, signature)
-
-
 @router.post("/retell")
 async def retell_webhook(request: Request):
     body = await request.body()
     signature = request.headers.get("x-retell-signature", "")
 
     if RETELL_API_KEY and signature:
-        if not verify_retell_signature(body, signature):
-            logging.warning("Invalid Retell webhook signature")
-            raise HTTPException(status_code=401, detail="Invalid signature")
+        try:
+            from retell import Retell
+            if not Retell.verify(
+                body.decode("utf-8"),
+                RETELL_API_KEY,
+                signature
+            ):
+                logging.warning("Invalid Retell webhook signature")
+                raise HTTPException(status_code=401, detail="Invalid signature")
+        except ImportError:
+            logging.warning("retell-sdk not installed, skipping signature verification")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logging.warning(f"Signature verification error: {e}, skipping")
 
     try:
         payload = await request.json()
