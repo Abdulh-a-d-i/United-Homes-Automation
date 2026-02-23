@@ -80,6 +80,15 @@ async def create_user(
     current_user: dict = Depends(require_admin)
 ):
     try:
+        home_latitude = None
+        home_longitude = None
+        if request.address:
+            from src.utils.radar import geocode_address
+            geo_result = geocode_address(request.address)
+            if geo_result:
+                home_latitude = geo_result["latitude"]
+                home_longitude = geo_result["longitude"]
+
         temp_password = _generate_temp_password()
         user = create_user_by_admin(
             {
@@ -88,7 +97,10 @@ async def create_user(
                 "first_name": request.first_name,
                 "last_name": request.last_name,
                 "phone": request.phone,
-                "skills": request.skills
+                "address": request.address,
+                "skills": request.skills,
+                "home_latitude": home_latitude,
+                "home_longitude": home_longitude
             },
             temp_password
         )

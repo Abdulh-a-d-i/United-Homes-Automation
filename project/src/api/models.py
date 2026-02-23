@@ -45,7 +45,19 @@ class CreateUserRequest(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     phone: Optional[str] = None
+    address: Optional[str] = None
     skills: Optional[List[str]] = None
+
+
+class CreateAppointmentRequest(BaseModel):
+    customer_name: str
+    customer_phone: Optional[str] = None
+    customer_email: Optional[str] = None
+    service_type: str
+    address: str
+    start_time: str
+    duration_minutes: int = 60
+    notes: Optional[str] = None
 
 
 class UpdateUserRequest(BaseModel):

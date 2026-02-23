@@ -308,15 +308,18 @@ def create_user_by_admin(user_data, temp_password):
         if user and user_data.get("skills"):
             skills_json = json.dumps(user_data["skills"])
             cur.execute("""
-                INSERT INTO technicians (user_id, name, email, phone, skills, status)
-                VALUES (%s, %s, %s, %s, %s::jsonb, 'active')
+                INSERT INTO technicians
+                (user_id, name, email, phone, skills, home_latitude, home_longitude, status)
+                VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, 'active')
                 RETURNING id
             """, (
                 user["id"],
                 f"{user_data.get('first_name', '')} {user_data.get('last_name', '')}".strip() or user_data["username"],
                 user_data["email"],
                 user_data.get("phone"),
-                skills_json
+                skills_json,
+                user_data.get("home_latitude"),
+                user_data.get("home_longitude")
             ))
 
         conn.commit()
