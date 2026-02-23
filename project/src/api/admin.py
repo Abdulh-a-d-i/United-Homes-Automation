@@ -50,7 +50,12 @@ async def list_users(
                 "last_name": u.get("last_name"),
                 "phone": u.get("phone"),
                 "is_admin": u.get("is_admin", False),
+                "is_active": u.get("is_active", True),
                 "skills": skills,
+                "address": {
+                    "latitude": float(u["home_latitude"]) if u.get("home_latitude") else None,
+                    "longitude": float(u["home_longitude"]) if u.get("home_longitude") else None
+                },
                 "calendar": {
                     "connected": u.get("calendar_connected", False),
                     "provider": u.get("calendar_provider"),

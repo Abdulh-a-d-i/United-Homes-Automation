@@ -1,4 +1,5 @@
 import logging
+from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from src.utils.auth import require_admin
@@ -84,10 +85,14 @@ async def call_log_stats(current_user: dict = Depends(require_admin)):
         stats = get_call_stats()
         stats_out = {}
         for k, v in stats.items():
-            if isinstance(v, (int, float)):
-                stats_out[k] = round(v, 1) if isinstance(v, float) else v
-            else:
+            if isinstance(v, Decimal):
+                stats_out[k] = round(float(v), 1)
+            elif isinstance(v, float):
+                stats_out[k] = round(v, 1)
+            elif isinstance(v, int):
                 stats_out[k] = v
+            else:
+                stats_out[k] = str(v) if v is not None else 0
         return JSONResponse(
             status_code=200,
             content={"success": True, "data": stats_out}

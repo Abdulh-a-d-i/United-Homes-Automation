@@ -214,3 +214,149 @@ def book_appointment(request: BookAppointmentRequest):
         time=request.start_time.isoformat(),
         message=f"Appointment booked with {tech['name']} at {request.start_time.isoformat()}"
     )
+
+
+class CancelByPhoneRequest(BaseModel):
+    phone_number: str
+    cancellation_reason: str = None
+
+
+@router.post("/cancel-appointment")
+def cancel_appointment_by_phone(request: CancelByPhoneRequest):
+    from src.utils.db import get_db_connection
+    from psycopg2.extras import RealDictCursor
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("""
+            SELECT id, customer_name, service_type, start_time, status
+            FROM appointments
+            WHERE customer_phone = %s AND status = 'scheduled'
+            AND start_time > CURRENT_TIMESTAMP
+            ORDER BY start_time ASC LIMIT 1
+        """, (request.phone_number,))
+        appt = cur.fetchone()
+
+        if not appt:
+            cur.execute("""
+                SELECT id, customer_name, service_type, start_time, status
+                FROM appointments_cache
+                WHERE customer_phone = %s AND status IN ('scheduled', 'confirmed')
+                AND start_time > CURRENT_TIMESTAMP
+                ORDER BY start_time ASC LIMIT 1
+            """, (request.phone_number,))
+            appt = cur.fetchone()
+
+        if not appt:
+            return {"success": False, "message": "No upcoming appointment found for this phone number"}
+
+        table = "appointments"
+        cur.execute(f"""
+            UPDATE {table} SET status = 'cancelled' WHERE id = %s
+        """, (appt["id"],))
+        conn.commit()
+
+        return {
+            "success": True,
+            "message": f"Appointment for {appt['customer_name']} on {appt['start_time']} has been cancelled",
+            "cancelled_appointment": {
+                "customer_name": appt["customer_name"],
+                "service_type": appt["service_type"],
+                "start_time": str(appt["start_time"])
+            }
+        }
+    except Exception as e:
+        conn.rollback()
+        return {"success": False, "message": f"Failed to cancel: {str(e)}"}
+    finally:
+        cur.close()
+        conn.close()
+
+
+class BookRedoRequest(BaseModel):
+    order_id: str
+    issue_description: str
+
+
+@router.post("/book-redo-appointment")
+def book_redo_appointment(request: BookRedoRequest):
+    from src.utils.db import get_db_connection
+    from psycopg2.extras import RealDictCursor
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("""
+            SELECT a.id, a.customer_name, a.customer_phone, a.customer_email,
+                   a.service_type, a.address, a.latitude, a.longitude,
+                   a.technician_id, t.name as technician_name
+            FROM appointments a
+            LEFT JOIN technicians t ON t.id = a.technician_id
+            WHERE a.customer_phone = %s OR CAST(a.id AS TEXT) = %s
+            ORDER BY a.created_at DESC LIMIT 1
+        """, (request.order_id, request.order_id))
+        original = cur.fetchone()
+
+        if not original:
+            cur.execute("""
+                SELECT id, customer_name, customer_phone, service_type,
+                       address, latitude, longitude, technician_id
+                FROM appointments_cache
+                WHERE customer_phone = %s OR CAST(id AS TEXT) = %s
+                ORDER BY created_at DESC LIMIT 1
+            """, (request.order_id, request.order_id))
+            original = cur.fetchone()
+
+        if not original:
+            return {"success": False, "message": "No previous appointment found with that ID or phone number"}
+
+        import uuid
+        redo_time = datetime.now() + timedelta(days=2)
+        redo_time = redo_time.replace(hour=10, minute=0, second=0, microsecond=0)
+        end_time = redo_time + timedelta(hours=1)
+
+        cur.execute("""
+            INSERT INTO appointments
+            (calendar_event_id, technician_id, customer_name, customer_phone,
+             customer_email, service_type, address, latitude, longitude,
+             start_time, end_time, duration_minutes, status, notes)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            str(uuid.uuid4()),
+            original["technician_id"],
+            original["customer_name"],
+            original["customer_phone"],
+            original.get("customer_email"),
+            original["service_type"],
+            original["address"],
+            original.get("latitude"),
+            original.get("longitude"),
+            redo_time,
+            end_time,
+            60,
+            "scheduled",
+            f"REDO - {request.issue_description}"
+        ))
+        redo_appt = cur.fetchone()
+        conn.commit()
+
+        return {
+            "success": True,
+            "message": f"Redo appointment booked for {original['customer_name']} at {original['address']} on {redo_time.strftime('%B %d at %I:%M %p')}",
+            "redo_appointment": {
+                "id": redo_appt["id"],
+                "customer_name": original["customer_name"],
+                "address": original["address"],
+                "service_type": original["service_type"],
+                "date": redo_time.strftime("%B %d at %I:%M %p"),
+                "technician": original.get("technician_name", "Same technician")
+            }
+        }
+    except Exception as e:
+        conn.rollback()
+        return {"success": False, "message": f"Failed to book redo: {str(e)}"}
+    finally:
+        cur.close()
+        conn.close()

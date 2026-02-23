@@ -1,9 +1,11 @@
 {
-    "agent_name": "United Home Services - Fixed Tools",
+    "agent_name": "United home service",
     "channel": "voice",
+    "last_modification_timestamp": 1771321915274,
     "response_engine": {
         "type": "conversation-flow",
-        "version": 0
+        "version": 0,
+        "conversation_flow_id": "conversation_flow_97128821c953"
     },
     "language": "en-US",
     "data_storage_setting": "everything",
@@ -18,16 +20,18 @@
     "voice_id": "11labs-Andrew",
     "max_call_duration_ms": 3600000,
     "interruption_sensitivity": 0.9,
+    "begin_message_delay_ms": 1000,
     "allow_user_dtmf": true,
     "user_dtmf_options": {},
     "conversationFlow": {
+        "conversation_flow_id": "conversation_flow_97128821c953",
         "version": 0,
-        "global_prompt": "You are a professional AI receptionist for United Home Services.\n\nCRITICAL RULES:\n1. When user gives address → CALL verify_address immediately\n2. SAVE the latitude, longitude, formatted_address from response\n3. When checking availability → USE saved lat/lon\n4. When booking → USE ALL saved data\n\nSERVICES: Chimney ($249), Dryer Vent ($149), Gutter ($199), Power Washing ($299), Air Duct ($399)",
+        "global_prompt": "You are Alex, a professional AI receptionist for United Home Services in Metro Charlotte.\n\nSERVICES: Chimney Cleaning ($249), Dryer Vent Cleaning ($149), Gutter Cleaning ($199), Power Washing ($299), Air Duct Cleaning ($399/system).\n\nRULES:\n- Always call required tools when indicated. Retry tool calls up to 2 times if they fail.\n- If user asks any question about services, refer to the Knowledge Base before answering.\n- If user is angry or asks for a human, use transfer_call immediately.\n- Be concise, professional, and friendly.",
         "nodes": [
             {
                 "instruction": {
                     "type": "prompt",
-                    "text": "Greet customer and ask what service they need."
+                    "text": "Start by saying: \"Thank you for calling United Home Services, this is Alex. How can I help you today?\"\n\nThen classify their intent:\n- New service/booking keywords (quote, price, book, schedule, cost) -> transition to Sales_State\n- Existing issue keywords (complain, issue, redo, fix, cancel, problem) -> transition to Support_State\n- If unclear, ask: \"Are you looking to book a new service or calling about a past job?\"\n\nFor any service questions, check the Knowledge Base first."
                 },
                 "model_choice": {
                     "type": "cascading",
@@ -37,26 +41,47 @@
                 "name": "Root_State",
                 "edges": [
                     {
-                        "destination_node_id": "sales-node",
+                        "destination_node_id": "node-1770285939818",
                         "id": "edge-1",
                         "transition_condition": {
                             "type": "prompt",
-                            "prompt": "New booking"
+                            "prompt": "User wants a new service or booking."
+                        }
+                    },
+                    {
+                        "destination_node_id": "node-1770286012250",
+                        "id": "edge-2",
+                        "transition_condition": {
+                            "type": "prompt",
+                            "prompt": "User has an existing issue or complaint."
                         }
                     }
                 ],
                 "start_speaker": "agent",
-                "id": "start-node",
+                "id": "start-node-1770283118544",
                 "type": "conversation",
                 "display_position": {
-                    "x": 100,
-                    "y": 100
+                    "x": 280.1470116540058,
+                    "y": 425.0474729269436
+                }
+            },
+            {
+                "name": "End Call",
+                "id": "end-call-node-1770283118544",
+                "type": "end",
+                "display_position": {
+                    "x": 2250.0727524899885,
+                    "y": 1371.2266821867518
+                },
+                "instruction": {
+                    "type": "prompt",
+                    "text": "Say: \"Thank you so much for calling United Home Services! If you need anything else, don't hesitate to call us back. Have a wonderful day!\" End the call warmly."
                 }
             },
             {
                 "instruction": {
                     "type": "prompt",
-                    "text": "Get service type and address. Call verify_address tool immediately."
+                    "text": "You are the Sales Agent. Follow these steps IN ORDER:\n\n1. IDENTIFY SERVICE: Ask what service they need. Match to our 5 services.\n2. GET ADDRESS: Ask for their address or zip code.\n3. CALL TOOL: Immediately call verify_address with their input. If tool fails, retry once.\n4. CONFIRM: Read back the formatted address. If wrong, ask again and re-call tool.\n5. QUOTE PRICE: State the price. Ask if it works.\n6. HANDLE OBJECTIONS:\n   - Military/Senior: Offer 10% off immediately.\n   - Air Duct hesitant: First offer 10% off. If still hesitant, offer flat $199/system.\n   - Gutter/Power Washing hesitant: Offer 10% off.\n   - Chimney/Dryer Vent: No discount, reiterate value.\n7. Once price agreed -> transition to Availability_State.\n\nFor any service questions, check the Knowledge Base."
                 },
                 "model_choice": {
                     "type": "cascading",
@@ -66,56 +91,130 @@
                 "name": "Sales_State",
                 "edges": [
                     {
-                        "destination_node_id": "verify-node",
-                        "id": "edge-2",
+                        "destination_node_id": "node-1770755689709",
+                        "id": "edge-1770900385441-aloinyf9r",
                         "transition_condition": {
                             "type": "prompt",
-                            "prompt": "User provided address"
+                            "prompt": "User provided an address. Call verify_address tool now."
                         }
                     },
                     {
-                        "destination_node_id": "availability-node",
-                        "id": "edge-3",
+                        "destination_node_id": "node-1770753551246",
+                        "id": "edge-1770900825431-oemhvk4rn",
                         "transition_condition": {
                             "type": "prompt",
-                            "prompt": "Address confirmed"
+                            "prompt": "User confirmed address AND agreed to price."
                         }
                     }
                 ],
-                "id": "sales-node",
+                "id": "node-1770285939818",
                 "knowledge_base_ids": [],
                 "type": "conversation",
                 "display_position": {
-                    "x": 400,
-                    "y": 100
+                    "x": 770.818591997161,
+                    "y": 32.476295911579996
                 }
             },
             {
-                "tool_id": "tool-verify",
+                "instruction": {
+                    "type": "prompt",
+                    "text": "Categorize the complaint using TIER logic:\n\nTIER 1 - EXPLAIN (no visit needed):\n- Cosmetic/environmental issues: streaks after drying, odor after rain, soot from first fire, debris after storm, dryer interior not cleaned.\n- Empathize and explain it's normal behavior. Do NOT book.\n\nTIER 2 - REDO (free re-service):\n- Workmanship issues: missed spots, residue left, still clogged, lint still blowing, debris left in yard.\n- Apologize and transition to Redo_Booking_State.\n\nTIER 3 - ESCALATE (transfer to human):\n- Safety/damage/money: leak, property damage, burning smell, refund, insurance, lawyer.\n- Transfer immediately.\n\nFor any questions about our services or policies, check the Knowledge Base."
+                },
+                "name": "Support_State",
+                "model_choice": {
+                    "type": "cascading",
+                    "model": "gemini-3.0-flash",
+                    "high_priority": false
+                },
+                "edges": [
+                    {
+                        "destination_node_id": "node-1770286048737",
+                        "id": "edge-1770286012250-4p36r10e6",
+                        "transition_condition": {
+                            "type": "prompt",
+                            "prompt": "Tier 3: Damage, safety, refund, or wants manager."
+                        }
+                    },
+                    {
+                        "destination_node_id": "node-1770643694251",
+                        "id": "edge-1770643721803-xg9ki8p6a",
+                        "transition_condition": {
+                            "type": "prompt",
+                            "prompt": "Customer wants to cancel an existing appointment."
+                        }
+                    },
+                    {
+                        "destination_node_id": "node-1771252057682",
+                        "id": "edge-1771254814916-n9cfh2srd",
+                        "transition_condition": {
+                            "type": "prompt",
+                            "prompt": "Tier 2: Missed work or redo needed."
+                        }
+                    }
+                ],
+                "id": "node-1770286012250",
+                "knowledge_base_ids": [],
+                "type": "conversation",
+                "display_position": {
+                    "x": 736.4375137829312,
+                    "y": 1125.6650201902983
+                }
+            },
+            {
+                "custom_sip_headers": {},
+                "transfer_destination": {
+                    "type": "predefined",
+                    "number": "+18563630633"
+                },
+                "edge": {
+                    "destination_node_id": "end-call-node-1770283118544",
+                    "id": "edge-1770286048737-53i002r5w",
+                    "transition_condition": {
+                        "type": "prompt",
+                        "prompt": "Transfer failed"
+                    }
+                },
+                "name": "Transfer Call",
+                "ignore_e164_validation": false,
+                "id": "node-1770286048737",
+                "transfer_option": {
+                    "type": "cold_transfer",
+                    "show_transferee_as_caller": false,
+                    "enable_bridge_audio_cue": true
+                },
+                "type": "transfer_call",
+                "speak_during_execution": false,
+                "display_position": {
+                    "x": 1465.2988354256013,
+                    "y": 1454.2099933871743
+                }
+            },
+            {
+                "tool_id": "tool-1770643690091",
                 "else_edge": {
-                    "destination_node_id": "sales-node",
-                    "id": "verify-else",
+                    "destination_node_id": "end-call-node-1770283118544",
+                    "id": "node-1770643694251-else-edge",
                     "transition_condition": {
                         "type": "prompt",
                         "prompt": "Else"
                     }
                 },
-                "name": "verify_address",
+                "name": "Cancel Appointment",
                 "edges": [],
-                "id": "verify-node",
+                "id": "node-1770643694251",
                 "type": "function",
                 "tool_type": "local",
-                "speak_during_execution": true,
+                "speak_during_execution": false,
                 "display_position": {
-                    "x": 400,
-                    "y": 300
+                    "x": 1800.8683359281813,
+                    "y": 1452.6433169419415
                 },
                 "wait_for_result": true
             },
             {
                 "instruction": {
                     "type": "prompt",
-                    "text": "Ask when they want service. Call check_technician_availability."
+                    "text": "You are the Scheduling Coordinator. You have the verified address and service type from context.\n\n1. Ask when they'd like the appointment. If vague, ask for a specific day and time of day.\n2. Once they give a time, CALL check_technician_availability tool. If tool fails, retry once.\n3. If available: Confirm the time. If user agrees -> transition to Book_State.\n4. If busy: Offer the alternative slots from the tool response.\n5. NEVER say a time is available without calling the tool first.\n\nFor any questions, check the Knowledge Base."
                 },
                 "model_choice": {
                     "type": "cascading",
@@ -125,55 +224,34 @@
                 "name": "Availability_State",
                 "edges": [
                     {
-                        "destination_node_id": "check-node",
-                        "id": "edge-4",
+                        "destination_node_id": "node-1770753674935",
+                        "id": "edge-1770753551247-vxiez83ws",
                         "transition_condition": {
                             "type": "prompt",
-                            "prompt": "Check availability"
+                            "prompt": "User has agreed to a specific time slot."
                         }
                     },
                     {
-                        "destination_node_id": "book-node",
-                        "id": "edge-5",
+                        "destination_node_id": "node-1770755722581",
+                        "id": "edge-1770900624414-c3t87fs1j",
                         "transition_condition": {
                             "type": "prompt",
-                            "prompt": "Time agreed"
+                            "prompt": "User gave a preferred time. Call check_technician_availability now."
                         }
                     }
                 ],
-                "id": "availability-node",
+                "id": "node-1770753551246",
+                "knowledge_base_ids": [],
                 "type": "conversation",
                 "display_position": {
-                    "x": 700,
-                    "y": 100
+                    "x": 1243.3176660721394,
+                    "y": 192.21676355663158
                 }
-            },
-            {
-                "tool_id": "tool-check",
-                "else_edge": {
-                    "destination_node_id": "availability-node",
-                    "id": "check-else",
-                    "transition_condition": {
-                        "type": "prompt",
-                        "prompt": "Else"
-                    }
-                },
-                "name": "check_technician_availability",
-                "edges": [],
-                "id": "check-node",
-                "type": "function",
-                "tool_type": "local",
-                "speak_during_execution": true,
-                "display_position": {
-                    "x": 700,
-                    "y": 300
-                },
-                "wait_for_result": true
             },
             {
                 "instruction": {
                     "type": "prompt",
-                    "text": "Get customer details. Call book_appointment."
+                    "text": "You are the Booking Specialist. You already have: verified address, agreed time slot, service type from context.\n\n1. Get customer's full name (if not already known).\n2. Get phone number.\n3. CALL book_appointment tool immediately. If tool fails, retry once.\n4. On success: Read back the FULL confirmation to the caller: \"You're all set! I've booked your [service_type] appointment at [address] on [date and time]. Your technician will be [technician_name]. We'll send a confirmation text to [phone_number]. Is there anything else I can help you with?\"\n5. On error: Say \"I've recorded your details and our team will text you a manual confirmation shortly.\"\n6. After confirmation, transition to End Call.\n\nDo NOT ask for address or time again."
                 },
                 "model_choice": {
                     "type": "cascading",
@@ -183,34 +261,79 @@
                 "name": "Book_State",
                 "edges": [
                     {
-                        "destination_node_id": "book-execute-node",
-                        "id": "edge-6",
+                        "destination_node_id": "end-call-node-1770283118544",
+                        "id": "edge-1770753674935-f7pvg7b4f",
                         "transition_condition": {
                             "type": "prompt",
-                            "prompt": "Execute booking"
+                            "prompt": "Appointment is confirmed and call is wrapping up."
                         }
                     },
                     {
-                        "destination_node_id": "end-node",
-                        "id": "edge-7",
+                        "destination_node_id": "node-1770755792494",
+                        "id": "edge-1770900287792-ghlf7njkp",
                         "transition_condition": {
                             "type": "prompt",
-                            "prompt": "Done"
+                            "prompt": "Have name and phone. Call book_appointment tool now."
                         }
                     }
                 ],
-                "id": "book-node",
+                "id": "node-1770753674935",
+                "knowledge_base_ids": [],
                 "type": "conversation",
                 "display_position": {
-                    "x": 1000,
-                    "y": 100
+                    "x": 1794.4761034033354,
+                    "y": 184.48594683825894
                 }
             },
             {
-                "tool_id": "tool-book",
+                "tool_id": "tool-1770754076296",
                 "else_edge": {
-                    "destination_node_id": "end-node",
-                    "id": "book-else",
+                    "destination_node_id": "node-1770285939818",
+                    "id": "node-1770755689709-else-edge",
+                    "transition_condition": {
+                        "type": "prompt",
+                        "prompt": "Else"
+                    }
+                },
+                "name": "verify_address",
+                "edges": [],
+                "id": "node-1770755689709",
+                "type": "function",
+                "tool_type": "local",
+                "speak_during_execution": false,
+                "display_position": {
+                    "x": 774.9770950267863,
+                    "y": 631.4298604577001
+                },
+                "wait_for_result": true
+            },
+            {
+                "tool_id": "tool-1770754520685",
+                "else_edge": {
+                    "destination_node_id": "node-1770753551246",
+                    "id": "node-1770755722581-else-edge",
+                    "transition_condition": {
+                        "type": "prompt",
+                        "prompt": "Else"
+                    }
+                },
+                "name": "check_technician_availability",
+                "edges": [],
+                "id": "node-1770755722581",
+                "type": "function",
+                "tool_type": "local",
+                "speak_during_execution": false,
+                "display_position": {
+                    "x": 1245.0901376559452,
+                    "y": 737.8524391137191
+                },
+                "wait_for_result": true
+            },
+            {
+                "tool_id": "tool-1770642855470",
+                "else_edge": {
+                    "destination_node_id": "node-1770753674935",
+                    "id": "node-1770755792494-else-edge",
                     "transition_condition": {
                         "type": "prompt",
                         "prompt": "Else"
@@ -218,46 +341,82 @@
                 },
                 "name": "book_appointment",
                 "edges": [],
-                "id": "book-execute-node",
+                "id": "node-1770755792494",
                 "type": "function",
                 "tool_type": "local",
-                "speak_during_execution": true,
+                "speak_during_execution": false,
                 "display_position": {
-                    "x": 1000,
-                    "y": 300
+                    "x": 1788.456245767616,
+                    "y": 685.7250058938187
                 },
                 "wait_for_result": true
             },
             {
-                "name": "End Call",
-                "id": "end-node",
-                "type": "end",
-                "display_position": {
-                    "x": 1300,
-                    "y": 100
-                },
                 "instruction": {
                     "type": "prompt",
-                    "text": "End call"
+                    "text": "Customer has a valid redo claim.\n\n1. Ask for their Order ID or Invoice Number. If they don't have it, ask for their phone number instead.\n2. CALL book_redo_appointment tool with order_id and issue_description. If tool fails, retry once.\n3. On success: Confirm the redo date and address from tool response. End call.\n4. On error: Transfer to human agent.\n\nThis is a FREE re-service. Do NOT mention any charge."
+                },
+                "model_choice": {
+                    "type": "cascading",
+                    "model": "gemini-3.0-flash",
+                    "high_priority": false
+                },
+                "name": "Redo_Booking_State",
+                "edges": [
+                    {
+                        "destination_node_id": "node-1771254791814",
+                        "id": "edge-1771252057682-thvrnobnw",
+                        "transition_condition": {
+                            "type": "prompt",
+                            "prompt": "Have order_id and issue_description. Call book_redo_appointment now."
+                        }
+                    }
+                ],
+                "id": "node-1771252057682",
+                "knowledge_base_ids": [],
+                "type": "conversation",
+                "display_position": {
+                    "x": 1108.3577402678966,
+                    "y": 1121.794796244816
                 }
+            },
+            {
+                "tool_id": "tool-1771254788507",
+                "else_edge": {
+                    "destination_node_id": "end-call-node-1770283118544",
+                    "id": "node-1771254791814-else-edge",
+                    "transition_condition": {
+                        "type": "prompt",
+                        "prompt": "Else"
+                    }
+                },
+                "name": "Book Redo Appointment",
+                "edges": [],
+                "id": "node-1771254791814",
+                "type": "function",
+                "tool_type": "local",
+                "speak_during_execution": false,
+                "display_position": {
+                    "x": 1609.1551590004196,
+                    "y": 1168.0161456544927
+                },
+                "wait_for_result": true
             }
         ],
-        "start_node_id": "start-node",
+        "start_node_id": "start-node-1770283118544",
         "start_speaker": "agent",
         "tools": [
             {
-                "headers": {
-                    "Content-Type": "application/json"
-                },
-                "parameter_type": "form",
+                "headers": {},
+                "parameter_type": "json",
                 "method": "POST",
                 "query_params": {},
-                "description": "Verifies address. Returns formatted_address, latitude, longitude.",
+                "description": "Verifies and geocodes a messy address into structured data.",
                 "type": "custom",
-                "url": "https://wholly-centuried-francis.ngrok-free.dev/api/appointments/verify-address",
-                "tool_id": "tool-verify",
+                "url": "http://161.118.168.134:8000/api/appointments/verify-address",
+                "tool_id": "tool-1770754076296",
                 "args_at_root": true,
-                "timeout_ms": 15000,
+                "timeout_ms": 20000,
                 "name": "verify_address",
                 "response_variables": {
                     "formatted_address": "$.formatted_address",
@@ -272,29 +431,29 @@
                     "properties": {
                         "messy_input": {
                             "type": "string",
-                            "description": "Raw address"
+                            "description": "The raw address or zip code the user spoke."
                         }
                     }
                 }
             },
             {
-                "headers": {
-                    "Content-Type": "application/json"
-                },
-                "parameter_type": "form",
+                "headers": {},
+                "parameter_type": "json",
                 "method": "POST",
                 "query_params": {},
-                "description": "Checks availability. Use lat/lon from verify_address.",
+                "description": "Finds the nearest available technician for the requested service, location, and time.",
                 "type": "custom",
-                "url": "https://wholly-centuried-francis.ngrok-free.dev/api/appointments/find-technician-availability",
-                "tool_id": "tool-check",
+                "url": "http://161.118.168.134:8000/api/appointments/find-technician-availability",
+                "tool_id": "tool-1770754520685",
                 "args_at_root": true,
-                "timeout_ms": 15000,
+                "timeout_ms": 20000,
                 "name": "check_technician_availability",
                 "response_variables": {
                     "technician_id": "$.technician.id",
                     "technician_name": "$.technician.name",
-                    "time_slot": "$.time_slot"
+                    "time_slot": "$.time_slot",
+                    "available": "$.available",
+                    "alternative_slots": "$.alternative_slots"
                 },
                 "parameters": {
                     "type": "object",
@@ -306,36 +465,39 @@
                     ],
                     "properties": {
                         "service_type": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "The service the customer needs."
                         },
                         "confirmed_latitude": {
-                            "type": "number"
+                            "type": "number",
+                            "description": "Latitude from verify_address response."
                         },
                         "confirmed_longitude": {
-                            "type": "number"
+                            "type": "number",
+                            "description": "Longitude from verify_address response."
                         },
                         "requested_datetime": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "ISO 8601 datetime the customer wants."
                         }
                     }
                 }
             },
             {
-                "headers": {
-                    "Content-Type": "application/json"
-                },
-                "parameter_type": "form",
+                "headers": {},
+                "parameter_type": "json",
                 "method": "POST",
                 "query_params": {},
-                "description": "Books appointment with all saved data.",
+                "description": "Books the appointment with all collected data.",
                 "type": "custom",
-                "url": "https://wholly-centuried-francis.ngrok-free.dev/api/appointments/book-appointment",
-                "tool_id": "tool-book",
+                "url": "http://161.118.168.134:8000/api/appointments/book-appointment",
+                "tool_id": "tool-1770642855470",
                 "args_at_root": true,
                 "timeout_ms": 20000,
                 "name": "book_appointment",
                 "response_variables": {
-                    "appointment_id": "$.appointment_id"
+                    "appointment_id": "$.appointment_id",
+                    "message": "$.message"
                 },
                 "parameters": {
                     "type": "object",
@@ -353,34 +515,105 @@
                     ],
                     "properties": {
                         "customer_name": {
-                            "type": "string"
+                            "type": "string",
+                            "description": ""
                         },
                         "customer_phone": {
-                            "type": "string"
+                            "type": "string",
+                            "description": ""
                         },
                         "customer_email": {
-                            "type": "string"
+                            "type": "string",
+                            "description": ""
                         },
                         "technician_id": {
-                            "type": "number"
+                            "type": "number",
+                            "description": ""
                         },
                         "service_type": {
-                            "type": "string"
+                            "type": "string",
+                            "description": ""
                         },
                         "address": {
-                            "type": "string"
+                            "type": "string",
+                            "description": ""
                         },
                         "latitude": {
-                            "type": "number"
+                            "type": "number",
+                            "description": ""
                         },
                         "longitude": {
-                            "type": "number"
+                            "type": "number",
+                            "description": ""
                         },
                         "start_time": {
-                            "type": "string"
+                            "type": "string",
+                            "description": ""
                         },
                         "duration_minutes": {
-                            "type": "number"
+                            "type": "number",
+                            "description": ""
+                        }
+                    }
+                }
+            },
+            {
+                "headers": {},
+                "parameter_type": "json",
+                "method": "POST",
+                "query_params": {},
+                "description": "Cancels the customer's upcoming appointment by their phone number.",
+                "type": "custom",
+                "url": "http://161.118.168.134:8000/api/appointments/cancel-appointment",
+                "tool_id": "tool-1770643690091",
+                "args_at_root": true,
+                "timeout_ms": 20000,
+                "name": "cancel_appointment",
+                "response_variables": {},
+                "parameters": {
+                    "type": "object",
+                    "required": [
+                        "phone_number"
+                    ],
+                    "properties": {
+                        "phone_number": {
+                            "type": "string",
+                            "description": "The user's phone number to identify the booking."
+                        },
+                        "cancellation_reason": {
+                            "type": "string",
+                            "description": "The reason why the user wants to cancel (optional)."
+                        }
+                    }
+                }
+            },
+            {
+                "headers": {},
+                "parameter_type": "json",
+                "method": "POST",
+                "query_params": {},
+                "description": "Books a free redo appointment using Order ID or phone number lookup.",
+                "type": "custom",
+                "url": "http://161.118.168.134:8000/api/appointments/book-redo-appointment",
+                "tool_id": "tool-1771254788507",
+                "args_at_root": true,
+                "timeout_ms": 20000,
+                "name": "book_redo_appointment",
+                "response_variables": {},
+                "parameters": {
+                    "type": "object",
+                    "required": [
+                        "order_id",
+                        "issue_description"
+                    ],
+                    "properties": {
+                        "order_id": {
+                            "type": "string",
+                            "description": "The Order ID or Invoice Number provided by the customer."
+                        },
+                        "issue_description": {
+                            "type": "string",
+                            "description": "Brief description of why a redo is needed."
                         }
                     }
                 }
@@ -398,11 +631,11 @@
             "filter_score": 0.6
         },
         "begin_tag_display_position": {
-            "x": 0,
-            "y": 0
+            "x": 112.76923076923075,
+            "y": 348.38461538461536
         },
         "is_published": false,
-        "flex_mode": false
-    },
-    "begin_message": "Hi, thank you for calling United Home Services! How can I help you today?"
+        "flex_mode": true,
+        "is_transfer_cf": false
+    }
 }

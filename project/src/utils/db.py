@@ -267,9 +267,10 @@ def get_all_users_paginated(page=1, page_size=20, search=None):
             search_pattern = f"%{search}%"
             cur.execute("""
                 SELECT u.id, u.username, u.email, u.first_name, u.last_name,
-                       u.phone, u.is_admin, u.created_at,
+                       u.phone, u.is_admin, u.is_active, u.created_at,
                        t.id as technician_id, t.skills, t.calendar_connected,
-                       t.calendar_provider, t.calendar_email
+                       t.calendar_provider, t.calendar_email,
+                       t.home_latitude, t.home_longitude, t.status as tech_status
                 FROM users u
                 LEFT JOIN technicians t ON t.user_id = u.id
                 WHERE u.username ILIKE %s OR u.email ILIKE %s
@@ -281,9 +282,10 @@ def get_all_users_paginated(page=1, page_size=20, search=None):
         else:
             cur.execute("""
                 SELECT u.id, u.username, u.email, u.first_name, u.last_name,
-                       u.phone, u.is_admin, u.created_at,
+                       u.phone, u.is_admin, u.is_active, u.created_at,
                        t.id as technician_id, t.skills, t.calendar_connected,
-                       t.calendar_provider, t.calendar_email
+                       t.calendar_provider, t.calendar_email,
+                       t.home_latitude, t.home_longitude, t.status as tech_status
                 FROM users u
                 LEFT JOIN technicians t ON t.user_id = u.id
                 ORDER BY u.created_at DESC
