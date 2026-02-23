@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 import traceback
 from fastapi import APIRouter, Request, HTTPException
@@ -12,39 +13,40 @@ router = APIRouter()
 
 RETELL_API_KEY = os.getenv("RETELL_API_KEY", "")
 
+retell_client = None
+if RETELL_API_KEY:
+    try:
+        from retell import Retell
+        retell_client = Retell(api_key=RETELL_API_KEY)
+    except Exception as e:
+        logging.warning(f"Retell SDK init failed: {e}")
+
 
 @router.post("/retell")
 async def retell_webhook(request: Request):
-    body = await request.body()
-    signature = request.headers.get("x-retell-signature", "")
-
-    if RETELL_API_KEY and signature:
-        try:
-            from retell import Retell
-            if not Retell.verify(
-                body.decode("utf-8"),
-                RETELL_API_KEY,
-                signature
-            ):
-                logging.warning("Invalid Retell webhook signature")
-                raise HTTPException(status_code=401, detail="Invalid signature")
-        except ImportError:
-            logging.warning("retell-sdk not installed, skipping signature verification")
-        except HTTPException:
-            raise
-        except Exception as e:
-            logging.warning(f"Signature verification error: {e}, skipping")
-
     try:
-        payload = await request.json()
+        post_data = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
-    event = payload.get("event")
-    call = payload.get("call", {})
+    if retell_client and RETELL_API_KEY:
+        try:
+            valid_signature = retell_client.verify(
+                json.dumps(post_data, separators=(",", ":"), ensure_ascii=False),
+                api_key=str(RETELL_API_KEY),
+                signature=str(request.headers.get("X-Retell-Signature", "")),
+            )
+            if not valid_signature:
+                logging.warning("Invalid Retell webhook signature")
+                return JSONResponse(status_code=401, content={"message": "Unauthorized"})
+        except Exception as e:
+            logging.warning(f"Signature verification error: {e}, skipping")
+
+    event = post_data.get("event")
+    call = post_data.get("call") or post_data.get("data", {})
 
     if not event or not call.get("call_id"):
-        return JSONResponse(status_code=204, content=None)
+        return JSONResponse(status_code=200, content={"message": "ok"})
 
     logging.info(f"Retell webhook: {event} for call {call.get('call_id')}")
 
@@ -75,4 +77,4 @@ async def retell_webhook(request: Request):
         logging.error(f"Failed to store call log: {e}")
         traceback.print_exc()
 
-    return JSONResponse(status_code=204, content=None)
+    return JSONResponse(status_code=200, content={"message": "ok"})
