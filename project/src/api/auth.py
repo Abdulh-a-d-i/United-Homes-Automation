@@ -56,6 +56,8 @@ async def login(user: UserLogin):
             "email": user.email.lower().strip(),
             "password": user.password
         })
+        if db_user == "deactivated":
+            raise HTTPException(status_code=403, detail="Account is deactivated. Contact admin.")
         if not db_user:
             raise HTTPException(status_code=401, detail="Invalid email or password")
 

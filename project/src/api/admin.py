@@ -12,7 +12,10 @@ from src.utils.db import (
     get_user_detail_with_calendar,
     update_user,
     get_appointments_paginated,
-    get_appointment_stats
+    get_appointment_stats,
+    deactivate_user,
+    activate_user,
+    delete_user
 )
 from src.api.models import CreateUserRequest, UpdateUserRequest
 
@@ -289,3 +292,74 @@ async def dashboard_stats(current_user: dict = Depends(require_admin)):
     except Exception as e:
         logging.error(f"Stats error: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch stats")
+
+
+@router.post("/users/{user_id}/deactivate")
+async def deactivate_user_endpoint(
+    user_id: int,
+    current_user: dict = Depends(require_admin)
+):
+    try:
+        if user_id == current_user["id"]:
+            raise HTTPException(status_code=400, detail="Cannot deactivate yourself")
+        user = get_user_detail_with_calendar(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        deactivate_user(user_id)
+        return JSONResponse(
+            status_code=200,
+            content={"success": True, "message": "User deactivated"}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Deactivate user error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to deactivate user")
+
+
+@router.post("/users/{user_id}/activate")
+async def activate_user_endpoint(
+    user_id: int,
+    current_user: dict = Depends(require_admin)
+):
+    try:
+        user = get_user_detail_with_calendar(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        activate_user(user_id)
+        return JSONResponse(
+            status_code=200,
+            content={"success": True, "message": "User activated"}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Activate user error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to activate user")
+
+
+@router.delete("/users/{user_id}")
+async def delete_user_endpoint(
+    user_id: int,
+    current_user: dict = Depends(require_admin)
+):
+    try:
+        if user_id == current_user["id"]:
+            raise HTTPException(status_code=400, detail="Cannot delete yourself")
+        user = get_user_detail_with_calendar(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        if user.get("is_admin"):
+            raise HTTPException(status_code=400, detail="Cannot delete admin users")
+        success = delete_user(user_id)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to delete user")
+        return JSONResponse(
+            status_code=200,
+            content={"success": True, "message": "User permanently deleted"}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Delete user error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete user")

@@ -27,8 +27,13 @@ def create_tables():
             last_name VARCHAR(255),
             phone VARCHAR(50),
             is_admin BOOLEAN DEFAULT FALSE,
+            is_active BOOLEAN DEFAULT TRUE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
+    """)
+
+    cur.execute("""
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE
     """)
 
     cur.execute("""
@@ -192,12 +197,14 @@ def login_user(user_data):
     try:
         cur.execute("""
             SELECT id, username, email, password_hash, first_name, last_name,
-                   phone, is_admin, created_at
+                   phone, is_admin, is_active, created_at
             FROM users WHERE email = %s
         """, (user_data["email"],))
         user = cur.fetchone()
         if not user:
             return None
+        if user.get("is_active") is False:
+            return "deactivated"
         if not bcrypt.checkpw(
             user_data["password"].encode("utf-8"),
             user["password_hash"].encode("utf-8")
@@ -342,6 +349,63 @@ def update_user_password(email, new_password):
         """, (hashed, email))
         conn.commit()
         return cur.rowcount > 0
+    finally:
+        cur.close()
+        conn.close()
+
+
+def deactivate_user(user_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("UPDATE users SET is_active = FALSE WHERE id = %s", (user_id,))
+        cur.execute("""
+            UPDATE technicians SET status = 'inactive' WHERE user_id = %s
+        """, (user_id,))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        cur.close()
+        conn.close()
+
+
+def activate_user(user_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("UPDATE users SET is_active = TRUE WHERE id = %s", (user_id,))
+        cur.execute("""
+            UPDATE technicians SET status = 'active' WHERE user_id = %s
+        """, (user_id,))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        cur.close()
+        conn.close()
+
+
+def delete_user(user_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id FROM technicians WHERE user_id = %s", (user_id,))
+        tech = cur.fetchone()
+        if tech:
+            tech_id = tech[0]
+            cur.execute("""
+                UPDATE appointments SET status = 'cancelled'
+                WHERE technician_id = %s AND status = 'scheduled'
+                AND start_time > CURRENT_TIMESTAMP
+            """, (tech_id,))
+            cur.execute("DELETE FROM appointments WHERE technician_id = %s", (tech_id,))
+            cur.execute("DELETE FROM technicians WHERE id = %s", (tech_id,))
+        cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Delete user error: {e}")
+        return False
     finally:
         cur.close()
         conn.close()
