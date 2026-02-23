@@ -7,6 +7,8 @@ from src.api import auth as auth_router
 from src.api import admin as admin_router
 from src.api import calendar as calendar_router
 from src.api import appointment_management
+from src.api import retell_webhooks
+from src.api import call_logs
 
 
 @asynccontextmanager
@@ -65,6 +67,18 @@ app.include_router(
     webhooks.router,
     prefix="/api/webhooks",
     tags=["webhooks"]
+)
+
+app.include_router(
+    retell_webhooks.router,
+    prefix="/api/webhooks",
+    tags=["retell-webhooks"]
+)
+
+app.include_router(
+    call_logs.router,
+    prefix="/api/call-logs",
+    tags=["call-logs"]
 )
 
 # GHL sync router commented out

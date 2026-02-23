@@ -109,6 +109,30 @@ def create_tables():
         )
     """)
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS call_logs (
+            id SERIAL PRIMARY KEY,
+            call_id VARCHAR(255) UNIQUE NOT NULL,
+            agent_id VARCHAR(255),
+            call_type VARCHAR(50),
+            direction VARCHAR(20),
+            from_number VARCHAR(50),
+            to_number VARCHAR(50),
+            call_status VARCHAR(50),
+            disconnection_reason VARCHAR(100),
+            start_timestamp BIGINT,
+            end_timestamp BIGINT,
+            duration_seconds INTEGER,
+            recording_url TEXT,
+            transcript TEXT,
+            transcript_object JSONB,
+            call_analysis JSONB,
+            metadata JSONB,
+            dynamic_variables JSONB,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     _ensure_schema_migration(cur)
 
     conn.commit()
@@ -878,3 +902,145 @@ def upsert_technician_from_ghl(ghl_user_id, ghl_calendar_id, name, email, phone,
     finally:
         cur.close()
         conn.close()
+
+
+def upsert_call_log(call_data):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        duration = None
+        if call_data.get("start_timestamp") and call_data.get("end_timestamp"):
+            duration = int((call_data["end_timestamp"] - call_data["start_timestamp"]) / 1000)
+
+        cur.execute("""
+            INSERT INTO call_logs
+            (call_id, agent_id, call_type, direction, from_number, to_number,
+             call_status, disconnection_reason, start_timestamp, end_timestamp,
+             duration_seconds, recording_url, transcript, transcript_object,
+             call_analysis, metadata, dynamic_variables)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (call_id) DO UPDATE SET
+                call_status = EXCLUDED.call_status,
+                disconnection_reason = COALESCE(EXCLUDED.disconnection_reason, call_logs.disconnection_reason),
+                end_timestamp = COALESCE(EXCLUDED.end_timestamp, call_logs.end_timestamp),
+                duration_seconds = COALESCE(EXCLUDED.duration_seconds, call_logs.duration_seconds),
+                recording_url = COALESCE(EXCLUDED.recording_url, call_logs.recording_url),
+                transcript = COALESCE(EXCLUDED.transcript, call_logs.transcript),
+                transcript_object = COALESCE(EXCLUDED.transcript_object, call_logs.transcript_object),
+                call_analysis = COALESCE(EXCLUDED.call_analysis, call_logs.call_analysis)
+            RETURNING *
+        """, (
+            call_data["call_id"],
+            call_data.get("agent_id"),
+            call_data.get("call_type"),
+            call_data.get("direction"),
+            call_data.get("from_number"),
+            call_data.get("to_number"),
+            call_data.get("call_status"),
+            call_data.get("disconnection_reason"),
+            call_data.get("start_timestamp"),
+            call_data.get("end_timestamp"),
+            duration,
+            call_data.get("recording_url"),
+            call_data.get("transcript"),
+            json.dumps(call_data.get("transcript_object")) if call_data.get("transcript_object") else None,
+            json.dumps(call_data.get("call_analysis")) if call_data.get("call_analysis") else None,
+            json.dumps(call_data.get("metadata")) if call_data.get("metadata") else None,
+            json.dumps(call_data.get("retell_llm_dynamic_variables")) if call_data.get("retell_llm_dynamic_variables") else None
+        ))
+        result = cur.fetchone()
+        conn.commit()
+        return dict(result) if result else None
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_call_logs_paginated(page=1, page_size=20, direction=None,
+                             call_status=None, date_from=None, date_to=None,
+                             search=None):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        offset = (page - 1) * page_size
+        conditions = []
+        params = []
+
+        if direction:
+            conditions.append("direction = %s")
+            params.append(direction)
+        if call_status:
+            conditions.append("call_status = %s")
+            params.append(call_status)
+        if date_from:
+            conditions.append("created_at >= %s")
+            params.append(date_from)
+        if date_to:
+            conditions.append("created_at <= %s")
+            params.append(date_to)
+        if search:
+            conditions.append("(from_number ILIKE %s OR to_number ILIKE %s OR transcript ILIKE %s)")
+            s = f"%{search}%"
+            params.extend([s, s, s])
+
+        where = ""
+        if conditions:
+            where = "WHERE " + " AND ".join(conditions)
+
+        cur.execute(f"""
+            SELECT * FROM call_logs {where}
+            ORDER BY created_at DESC
+            LIMIT %s OFFSET %s
+        """, params + [page_size, offset])
+        logs = cur.fetchall()
+
+        cur.execute(f"SELECT COUNT(*) FROM call_logs {where}", params)
+        total = cur.fetchone()["count"]
+
+        return {
+            "logs": [dict(l) for l in logs],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": (total + page_size - 1) // page_size
+        }
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_call_log_by_call_id(call_id):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("SELECT * FROM call_logs WHERE call_id = %s", (call_id,))
+        log = cur.fetchone()
+        return dict(log) if log else None
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_call_stats():
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("""
+            SELECT
+                COUNT(*) as total_calls,
+                COUNT(*) FILTER (WHERE direction = 'inbound') as inbound,
+                COUNT(*) FILTER (WHERE direction = 'outbound') as outbound,
+                COUNT(*) FILTER (WHERE disconnection_reason = 'user_hangup') as user_hangup,
+                COUNT(*) FILTER (WHERE disconnection_reason = 'agent_hangup') as agent_hangup,
+                COUNT(*) FILTER (WHERE disconnection_reason LIKE 'dial_%') as failed,
+                COALESCE(AVG(duration_seconds) FILTER (WHERE duration_seconds > 0), 0) as avg_duration_seconds,
+                COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE) as today,
+                COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE - INTERVAL '7 days') as last_7_days
+            FROM call_logs
+        """)
+        stats = cur.fetchone()
+        return dict(stats) if stats else {}
+    finally:
+        cur.close()
+        conn.close()
+
