@@ -17,9 +17,7 @@ from src.api.models import UpdateAppointmentStatus, CreateAppointmentRequest
 router = APIRouter()
 
 
-# ============================================================
-# ADMIN ENDPOINTS
-# ============================================================
+
 
 @router.get("/admin/list")
 async def admin_list_appointments(
@@ -44,25 +42,35 @@ async def admin_list_appointments(
             search=search,
             time_filter=time_filter
         )
-        appointments_out = []
+        appointments_out = {}
         for a in result["appointments"]:
-            appointments_out.append({
+            appointments_out[str(a["id"])] = {
                 "id": a["id"],
                 "calendar_event_id": a.get("calendar_event_id"),
-                "technician_id": a["technician_id"],
-                "technician_name": a.get("technician_name"),
-                "customer_name": a["customer_name"],
-                "customer_phone": a.get("customer_phone"),
-                "customer_email": a.get("customer_email"),
-                "service_type": a["service_type"],
-                "address": a.get("address"),
-                "start_time": str(a["start_time"]),
-                "end_time": str(a["end_time"]),
-                "duration_minutes": a.get("duration_minutes"),
                 "status": a["status"],
+                "service_type": a["service_type"],
+                "customer": {
+                    "name": a["customer_name"],
+                    "phone": a.get("customer_phone"),
+                    "email": a.get("customer_email")
+                },
+                "technician": {
+                    "id": a["technician_id"],
+                    "name": a.get("technician_name")
+                },
+                "schedule": {
+                    "start_time": str(a["start_time"]),
+                    "end_time": str(a["end_time"]),
+                    "duration_minutes": a.get("duration_minutes")
+                },
+                "location": {
+                    "address": a.get("address"),
+                    "latitude": float(a["latitude"]) if a.get("latitude") else None,
+                    "longitude": float(a["longitude"]) if a.get("longitude") else None
+                },
                 "notes": a.get("notes"),
                 "created_at": str(a.get("created_at", ""))
-            })
+            }
         return JSONResponse(
             status_code=200,
             content={
