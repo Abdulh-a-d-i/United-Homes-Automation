@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional, List
@@ -8,6 +8,7 @@ from src.utils.db import (
     delete_appointment_cache,
     delete_route_cache
 )
+from src.utils.api_key_auth import verify_retell_api_key
 
 router = APIRouter()
 
@@ -24,7 +25,7 @@ class AppointmentWebhook(BaseModel):
 
 
 @router.post("/appointment-created")
-def appointment_created(webhook: AppointmentWebhook):
+def appointment_created(webhook: AppointmentWebhook, _auth=Depends(verify_retell_api_key)):
     start_time = datetime.fromisoformat(webhook.start_time.replace("Z", "+00:00"))
     end_time = datetime.fromisoformat(webhook.end_time.replace("Z", "+00:00"))
 
@@ -46,7 +47,7 @@ def appointment_created(webhook: AppointmentWebhook):
 
 
 @router.post("/appointment-deleted")
-def appointment_deleted(webhook: AppointmentWebhook):
+def appointment_deleted(webhook: AppointmentWebhook, _auth=Depends(verify_retell_api_key)):
     delete_appointment_cache(webhook.id)
 
     start_time = datetime.fromisoformat(webhook.start_time.replace("Z", "+00:00"))

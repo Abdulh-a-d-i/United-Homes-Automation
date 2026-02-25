@@ -1,11 +1,15 @@
 import logging
+import uuid
 from typing import Optional
-from fastapi import APIRouter, HTTPException
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from datetime import datetime, timedelta
+
 from src.utils.radar import geocode_address
-from src.utils.db import get_techs_with_skill, get_technician, insert_appointment_cache, delete_route_cache
+from src.utils.db import get_techs_with_skill, get_technician, insert_appointment, delete_route_cache
 from src.utils.distance import calculate_distance, estimate_tech_location
+from src.utils.api_key_auth import verify_retell_api_key
 
 router = APIRouter()
 
@@ -64,7 +68,7 @@ class BookAppointmentResponse(BaseModel):
 
 
 @router.post("/verify-address", response_model=VerifyAddressResponse)
-def verify_address(request: VerifyAddressRequest):
+def verify_address(request: VerifyAddressRequest, _auth=Depends(verify_retell_api_key)):
     try:
         result = geocode_address(request.messy_input)
         if not result:
@@ -84,7 +88,7 @@ def verify_address(request: VerifyAddressRequest):
 
 
 @router.post("/find-technician-availability", response_model=FindTechnicianResponse)
-def find_technician_availability(request: FindTechnicianRequest):
+def find_technician_availability(request: FindTechnicianRequest, _auth=Depends(verify_retell_api_key)):
     try:
         logging.info(f"[AVAILABILITY] Request: service={request.service_type}, lat={request.confirmed_latitude}, lng={request.confirmed_longitude}, time={request.requested_datetime}")
 
@@ -138,35 +142,26 @@ def find_technician_availability(request: FindTechnicianRequest):
         tech_scores.sort(key=lambda x: (not x["available"], x["distance"]))
 
         if not tech_scores:
-            # No techs in radius, but still offer the closest one
-            all_techs_with_distance = []
+            # No techs in radius — log distances and tell the agent
+            logging.warning(f"[AVAILABILITY] No techs within radius for {request.service_type}. Distances:")
             for tech in techs:
                 if not tech.get("home_latitude") or not tech.get("home_longitude"):
+                    logging.warning(f"  {tech['name']} (id={tech['id']}): NO COORDINATES")
                     continue
                 dist = calculate_distance(
                     float(tech["home_latitude"]), float(tech["home_longitude"]),
                     request.confirmed_latitude, request.confirmed_longitude
                 )
-                all_techs_with_distance.append({"tech": tech, "distance": dist})
-
-            if all_techs_with_distance:
-                all_techs_with_distance.sort(key=lambda x: x["distance"])
-                closest = all_techs_with_distance[0]
-                return FindTechnicianResponse(
-                    success=True,
-                    technician=TechnicianInfo(
-                        id=closest["tech"]["id"],
-                        name=closest["tech"]["name"],
-                        distance_miles=round(closest["distance"], 2)
-                    ),
-                    available=True,
-                    time_slot=request.requested_datetime.isoformat()
+                max_r = tech.get("max_radius_miles") or 50
+                logging.warning(
+                    "  %s (id=%d): %.1f miles away, max_radius=%dmi -- TOO FAR",
+                    tech["name"], tech["id"], dist, max_r,
                 )
 
             return FindTechnicianResponse(
                 success=False,
                 available=False,
-                message="No technicians available in your area right now"
+                message="No technicians available in your area. All our technicians are outside service range for this location."
             )
 
         best_tech = tech_scores[0]
@@ -209,7 +204,7 @@ def find_technician_availability(request: FindTechnicianRequest):
             message="Error checking availability. Please try again."
         )
 @router.post("/book-appointment", response_model=BookAppointmentResponse)
-def book_appointment(request: BookAppointmentRequest):
+def book_appointment(request: BookAppointmentRequest, _auth=Depends(verify_retell_api_key)):
     logging.info(f"[BOOKING] Request: customer={request.customer_name}, phone={request.customer_phone}, tech_id={request.technician_id}, service={request.service_type}, time={request.start_time}, address={request.address}")
 
     try:
@@ -221,22 +216,23 @@ def book_appointment(request: BookAppointmentRequest):
 
         end_time = request.start_time + timedelta(minutes=request.duration_minutes)
 
-        import uuid
         appointment_id = str(uuid.uuid4())
         logging.info(f"[BOOKING] Generated appointment_id={appointment_id}")
 
-        insert_appointment_cache(
-            appointment_id,
-            request.technician_id,
-            request.customer_name,
-            request.customer_phone,
-            request.service_type,
-            request.address,
-            request.latitude,
-            request.longitude,
-            request.start_time,
-            end_time,
-            "scheduled"
+        insert_appointment(
+            calendar_event_id=appointment_id,
+            technician_id=request.technician_id,
+            customer_name=request.customer_name,
+            customer_phone=request.customer_phone,
+            customer_email=request.customer_email,
+            service_type=request.service_type,
+            address=request.address,
+            latitude=request.latitude,
+            longitude=request.longitude,
+            start_time=request.start_time,
+            end_time=end_time,
+            duration_minutes=request.duration_minutes,
+            status="scheduled"
         )
 
         delete_route_cache(request.technician_id, request.start_time.date())
@@ -266,7 +262,7 @@ class CancelByPhoneRequest(BaseModel):
 
 
 @router.post("/cancel-appointment")
-def cancel_appointment_by_phone(request: CancelByPhoneRequest):
+def cancel_appointment_by_phone(request: CancelByPhoneRequest, _auth=Depends(verify_retell_api_key)):
     from src.utils.db import get_db_connection
     from psycopg2.extras import RealDictCursor
 
@@ -324,7 +320,7 @@ class BookRedoRequest(BaseModel):
 
 
 @router.post("/book-redo-appointment")
-def book_redo_appointment(request: BookRedoRequest):
+def book_redo_appointment(request: BookRedoRequest, _auth=Depends(verify_retell_api_key)):
     from src.utils.db import get_db_connection
     from psycopg2.extras import RealDictCursor
 
@@ -355,7 +351,6 @@ def book_redo_appointment(request: BookRedoRequest):
         if not original:
             return {"success": False, "message": "No previous appointment found with that ID or phone number"}
 
-        import uuid
         redo_time = datetime.now() + timedelta(days=2)
         redo_time = redo_time.replace(hour=10, minute=0, second=0, microsecond=0)
         end_time = redo_time + timedelta(hours=1)

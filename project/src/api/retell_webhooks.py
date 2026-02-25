@@ -40,7 +40,8 @@ async def retell_webhook(request: Request):
                 logging.warning("Invalid Retell webhook signature")
                 return JSONResponse(status_code=401, content={"message": "Unauthorized"})
         except Exception as e:
-            logging.warning(f"Signature verification error: {e}, skipping")
+            logging.warning(f"Signature verification error: {e}")
+            return JSONResponse(status_code=401, content={"message": "Signature verification failed"})
 
     event = post_data.get("event")
     call = post_data.get("call") or post_data.get("data", {})

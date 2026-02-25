@@ -1,19 +1,19 @@
-from fastapi import APIRouter
-from typing import List, Optional
+"""Technicians API -- list technicians for admin dashboard."""
 import json
+
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+from typing import List, Optional
+
+from src.utils.auth import require_admin
 from src.utils.db import get_all_technicians
 
 router = APIRouter()
 
 
-class TechnicianResponse:
-    pass
-
-
-from pydantic import BaseModel
-
-
 class TechnicianOut(BaseModel):
+    """Technician data returned to the admin dashboard."""
+
     id: int
     name: str
     email: str
@@ -29,7 +29,8 @@ class TechnicianOut(BaseModel):
 
 
 @router.get("/", response_model=List[TechnicianOut])
-def get_technicians():
+def get_technicians(current_user: dict = Depends(require_admin)):
+    """Return all technicians. Requires admin authentication."""
     techs = get_all_technicians()
     result = []
     for tech in techs:
@@ -48,6 +49,6 @@ def get_technicians():
             status=tech.get("status", "active"),
             calendar_connected=tech.get("calendar_connected", False),
             calendar_provider=tech.get("calendar_provider"),
-            calendar_email=tech.get("calendar_email")
+            calendar_email=tech.get("calendar_email"),
         ))
     return result

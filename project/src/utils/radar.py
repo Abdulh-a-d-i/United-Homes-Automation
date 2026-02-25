@@ -11,7 +11,6 @@ def geocode_address(messy_address):
     api_key = os.getenv("RADAR_API_KEY")
 
     logging.info(f"[RADAR] Geocoding address: '{messy_address}'")
-    logging.info(f"[RADAR] API key present: {bool(api_key)}, key prefix: {api_key[:8] + '...' if api_key else 'MISSING'}")
 
     headers = {"Authorization": api_key}
     params = {"query": messy_address}

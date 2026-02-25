@@ -39,8 +39,6 @@ def create_tables():
     cur.execute("""
         CREATE TABLE IF NOT EXISTS technicians (
             id SERIAL PRIMARY KEY,
-            ghl_user_id VARCHAR(255),
-            ghl_calendar_id VARCHAR(255),
             user_id INTEGER REFERENCES users(id),
             name VARCHAR(255),
             email VARCHAR(255),
@@ -173,7 +171,12 @@ def _seed_admin_user():
             conn.close()
             return
         admin_email = os.getenv("ADMIN_EMAIL", "admin@unitedhomeservices.com")
-        admin_password = os.getenv("ADMIN_PASSWORD", "admin123456")
+        admin_password = os.getenv("ADMIN_PASSWORD")
+        if not admin_password:
+            logging.warning("ADMIN_PASSWORD not set in .env -- skipping admin seed")
+            cur.close()
+            conn.close()
+            return
         hashed = bcrypt.hashpw(admin_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
         cur.execute("""
             INSERT INTO users (username, email, password_hash, first_name, is_admin)
@@ -339,11 +342,20 @@ def create_user_by_admin(user_data, temp_password):
         user = cur.fetchone()
 
         if user and user_data.get("skills"):
-            skills_json = json.dumps(user_data["skills"])
+            # Normalize skills: split comma-separated strings, trim, lowercase
+            raw_skills = user_data["skills"]
+            normalized = []
+            for s in raw_skills:
+                # Handle "plumber, electrican" -> ["plumber", "electrican"]
+                parts = [p.strip().lower() for p in s.split(",") if p.strip()]
+                normalized.extend(parts)
+            skills_json = json.dumps(normalized)
+            logging.info(f"[USER CREATE] Creating tech for user {user['id']} with skills: {normalized}")
+
             cur.execute("""
                 INSERT INTO technicians
-                (user_id, name, email, phone, skills, home_latitude, home_longitude, status)
-                VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, 'active')
+                (user_id, name, email, phone, skills, home_latitude, home_longitude, max_radius_miles, status)
+                VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, 'active')
                 RETURNING id
             """, (
                 user["id"],
@@ -352,8 +364,11 @@ def create_user_by_admin(user_data, temp_password):
                 user_data.get("phone"),
                 skills_json,
                 user_data.get("home_latitude"),
-                user_data.get("home_longitude")
+                user_data.get("home_longitude"),
+                50  # default max radius miles
             ))
+            tech_id = cur.fetchone()
+            logging.info(f"[USER CREATE] Created technician id={tech_id['id'] if tech_id else 'unknown'} for user {user['id']}")
 
         conn.commit()
         return dict(user) if user else None
@@ -467,21 +482,71 @@ def update_user(user_id, updates):
             if key in updates and updates[key] is not None:
                 user_fields[key] = updates[key]
         if "skills" in updates:
-            tech_fields["skills"] = json.dumps(updates["skills"])
+            # Normalize skills: split comma-separated strings, trim, lowercase
+            raw_skills = updates["skills"]
+            normalized = []
+            for s in raw_skills:
+                parts = [p.strip().lower() for p in s.split(",") if p.strip()]
+                normalized.extend(parts)
+            tech_fields["skills"] = json.dumps(normalized)
 
         if user_fields:
             set_clause = ", ".join(f"{k} = %s" for k in user_fields)
             values = list(user_fields.values()) + [user_id]
             cur.execute(f"UPDATE users SET {set_clause} WHERE id = %s", values)
 
+        # If skills were provided, upsert the technician row
         if tech_fields:
             cur.execute("SELECT id FROM technicians WHERE user_id = %s", (user_id,))
             tech = cur.fetchone()
             if tech:
+                # Update existing tech row with skills
                 cur.execute(
                     "UPDATE technicians SET skills = %s::jsonb WHERE user_id = %s",
                     (tech_fields["skills"], user_id)
                 )
+                logging.info(f"[USER UPDATE] Updated tech skills for user {user_id}")
+            else:
+                # No tech row exists - create one
+                cur.execute(
+                    "SELECT username, email, first_name, last_name, phone FROM users WHERE id = %s",
+                    (user_id,)
+                )
+                user_row = cur.fetchone()
+                if user_row:
+                    name = f"{user_row.get('first_name', '') or ''} {user_row.get('last_name', '') or ''}".strip()
+                    name = name or user_row["username"]
+                    cur.execute("""
+                        INSERT INTO technicians
+                        (user_id, name, email, phone, skills, max_radius_miles, status)
+                        VALUES (%s, %s, %s, %s, %s::jsonb, %s, 'active')
+                    """, (
+                        user_id, name, user_row["email"], user_row.get("phone"),
+                        tech_fields["skills"], 50
+                    ))
+                    logging.info(f"[USER UPDATE] Created new tech row for user {user_id} with skills")
+
+        # Sync name/phone changes to technicians table
+        if user_fields and any(k in user_fields for k in ["first_name", "last_name", "phone"]):
+            cur.execute("SELECT id FROM technicians WHERE user_id = %s", (user_id,))
+            tech = cur.fetchone()
+            if tech:
+                sync_updates = {}
+                if "first_name" in user_fields or "last_name" in user_fields:
+                    cur.execute(
+                        "SELECT first_name, last_name, username FROM users WHERE id = %s",
+                        (user_id,)
+                    )
+                    u = cur.fetchone()
+                    if u:
+                        name = f"{u.get('first_name', '') or ''} {u.get('last_name', '') or ''}".strip()
+                        sync_updates["name"] = name or u["username"]
+                if "phone" in user_fields:
+                    sync_updates["phone"] = user_fields["phone"]
+                if sync_updates:
+                    set_clause = ", ".join(f"{k} = %s" for k in sync_updates)
+                    values = list(sync_updates.values()) + [user_id]
+                    cur.execute(f"UPDATE technicians SET {set_clause} WHERE user_id = %s", values)
 
         conn.commit()
         return get_user_detail_with_calendar(user_id)
@@ -829,6 +894,37 @@ def get_tech_appointments_for_day(tech_id, date):
             ORDER BY start_time
         """, (tech_id, date))
         return [dict(appt) for appt in cur.fetchall()]
+    finally:
+        cur.close()
+        conn.close()
+
+
+def insert_appointment(calendar_event_id, technician_id, customer_name,
+                       customer_phone, customer_email, service_type, address,
+                       latitude, longitude, start_time, end_time,
+                       duration_minutes, status, notes=None):
+    """Insert a new appointment into the MAIN appointments table."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            INSERT INTO appointments
+            (calendar_event_id, technician_id, customer_name, customer_phone,
+             customer_email, service_type, address, latitude, longitude,
+             start_time, end_time, duration_minutes, status, notes)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (calendar_event_id, technician_id, customer_name, customer_phone,
+              customer_email, service_type, address, latitude, longitude,
+              start_time, end_time, duration_minutes, status, notes))
+        result = cur.fetchone()
+        conn.commit()
+        logging.info(f"[DB] Inserted appointment id={result[0] if result else 'unknown'} into appointments table")
+        return result[0] if result else None
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"[DB] Failed to insert appointment: {e}")
+        raise
     finally:
         cur.close()
         conn.close()

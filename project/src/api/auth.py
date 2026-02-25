@@ -1,27 +1,25 @@
+"""Authentication API -- login, password reset, profile."""
 import os
 import logging
 import traceback
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
+
 from src.utils.jwt_utils import (
     create_access_token,
     create_password_reset_token,
-    verify_password_reset_token
+    verify_password_reset_token,
 )
 from src.utils.auth import get_current_user
-from src.utils.db import (
-    register_user,
-    login_user,
-    get_user_by_id,
-    update_user_password
-)
+from src.utils.db import login_user, update_user_password
 from src.api.models import (
     UserRegister,
     UserLogin,
     UserOut,
     LoginResponse,
     ForgotPasswordRequest,
-    ResetPasswordRequest
+    ResetPasswordRequest,
 )
 
 router = APIRouter()
@@ -29,24 +27,14 @@ router = APIRouter()
 
 @router.post("/register")
 async def register(user: UserRegister):
-    try:
-        result = register_user({
-            "username": user.username.lower().strip(),
-            "email": user.email.lower().strip(),
-            "password": user.password
-        })
-        if not result:
-            raise HTTPException(status_code=400, detail="Registration failed")
-        return JSONResponse(
-            status_code=201,
-            content={"success": True, "message": "User registered successfully"}
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logging.error(f"Registration error: {e}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail="Registration failed")
+    """
+    Registration is disabled. Users are created by admins only
+    via /api/admin/users/create.
+    """
+    raise HTTPException(
+        status_code=403,
+        detail="Self-registration is disabled. Contact your administrator."
+    )
 
 
 @router.post("/login", response_model=LoginResponse)
