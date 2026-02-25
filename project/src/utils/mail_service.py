@@ -173,3 +173,51 @@ def send_cancellation_email(customer_email, customer_name, service_type, start_t
     </div>
     """
     _send_email(customer_email, subject, html_body)
+
+
+def send_technician_daily_schedule(tech_email, tech_name, schedule_date, appointments, schedule_url):
+    """Send technician their next-day schedule at 6 PM ET."""
+    subject = f"Your Schedule for {schedule_date} - United Home Services"
+
+    if not appointments:
+        appt_rows = "<tr><td colspan='4' style='padding: 12px; text-align: center; color: #7f8c8d;'>No appointments scheduled for tomorrow.</td></tr>"
+    else:
+        appt_rows = ""
+        for i, appt in enumerate(appointments, 1):
+            appt_rows += f"""
+            <tr style="background: {'#f8f9fa' if i % 2 == 0 else '#ffffff'};">
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">{appt.get('start_time', '')} - {appt.get('end_time', '')}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">{appt.get('service_type', '')}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">{appt.get('customer_name', '')}<br><small style="color:#7f8c8d;">{appt.get('customer_phone', '')}</small></td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">{appt.get('address', '')}</td>
+            </tr>"""
+
+    html_body = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 650px; margin: 0 auto; padding: 20px;">
+        <h2 style="color: #2c3e50;">📋 Your Schedule for {schedule_date}</h2>
+        <p>Hello {tech_name},</p>
+        <p>Here is your schedule for <strong>{schedule_date}</strong>:</p>
+        <table style="width: 100%; border-collapse: collapse; margin: 20px 0; border: 1px solid #ddd; border-radius: 8px;">
+            <thead>
+                <tr style="background: #2c3e50; color: white;">
+                    <th style="padding: 10px; text-align: left;">Time</th>
+                    <th style="padding: 10px; text-align: left;">Service</th>
+                    <th style="padding: 10px; text-align: left;">Customer</th>
+                    <th style="padding: 10px; text-align: left;">Address</th>
+                </tr>
+            </thead>
+            <tbody>
+                {appt_rows}
+            </tbody>
+        </table>
+        <p><strong>Total appointments: {len(appointments)}</strong></p>
+        <a href="{schedule_url}" style="display: inline-block; background: #3498db; color: white;
+           padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 10px 0;">
+            View Full Schedule
+        </a>
+        <p style="color: #7f8c8d; font-size: 12px; margin-top: 30px;">
+            This schedule was sent at 6:00 PM ET. If you have questions, contact your dispatcher.
+        </p>
+    </div>
+    """
+    _send_email(tech_email, subject, html_body)

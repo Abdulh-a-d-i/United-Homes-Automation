@@ -140,226 +140,93 @@ async def admin_update_status(
 
 
 # ============================================================
-# USER ENDPOINTS (technician's own appointments)
+# TECHNICIAN ENDPOINTS (next-day schedule only, released at 6 PM)
 # ============================================================
 
-@router.get("/my/upcoming")
-async def my_upcoming_appointments(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+@router.get("/my/schedule")
+async def my_next_day_schedule(
     current_user: dict = Depends(get_current_user)
 ):
-    try:
-        tech = get_technician_by_user_id(current_user["id"])
-        tech_id = tech["id"] if tech else None
-
-        result = get_appointments_paginated(
-            page=page,
-            page_size=page_size,
-            technician_id=tech_id,
-            time_filter="upcoming"
-        )
-        appointments_out = []
-        for a in result["appointments"]:
-            appointments_out.append({
-                "id": a["id"],
-                "technician_name": a.get("technician_name"),
-                "customer_name": a["customer_name"],
-                "customer_phone": a.get("customer_phone"),
-                "customer_email": a.get("customer_email"),
-                "service_type": a["service_type"],
-                "address": a.get("address"),
-                "start_time": str(a["start_time"]),
-                "end_time": str(a["end_time"]),
-                "status": a["status"],
-                "notes": a.get("notes")
-            })
-        return JSONResponse(
-            status_code=200,
-            content={
-                "success": True,
-                "data": appointments_out,
-                "pagination": {
-                    "total": result["total"],
-                    "page": result["page"],
-                    "page_size": result["page_size"],
-                    "total_pages": result["total_pages"]
-                }
-            }
-        )
-    except Exception as e:
-        logging.error(f"My upcoming appointments error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to fetch appointments")
-
-
-@router.get("/my/past")
-async def my_past_appointments(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    current_user: dict = Depends(get_current_user)
-):
-    try:
-        tech = get_technician_by_user_id(current_user["id"])
-        tech_id = tech["id"] if tech else None
-
-        result = get_appointments_paginated(
-            page=page,
-            page_size=page_size,
-            technician_id=tech_id,
-            time_filter="past"
-        )
-        appointments_out = []
-        for a in result["appointments"]:
-            appointments_out.append({
-                "id": a["id"],
-                "technician_name": a.get("technician_name"),
-                "customer_name": a["customer_name"],
-                "service_type": a["service_type"],
-                "address": a.get("address"),
-                "start_time": str(a["start_time"]),
-                "end_time": str(a["end_time"]),
-                "status": a["status"]
-            })
-        return JSONResponse(
-            status_code=200,
-            content={
-                "success": True,
-                "data": appointments_out,
-                "pagination": {
-                    "total": result["total"],
-                    "page": result["page"],
-                    "page_size": result["page_size"],
-                    "total_pages": result["total_pages"]
-                }
-            }
-        )
-    except Exception as e:
-        logging.error(f"My past appointments error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to fetch appointments")
-
-
-@router.post("/my/create")
-async def my_create_appointment(
-    request: CreateAppointmentRequest,
-    current_user: dict = Depends(get_current_user)
-):
+    """
+    Technicians only see their NEXT DAY schedule.
+    Schedule is released at 6:00 PM the prior day.
+    Before 6 PM, returns empty with a message.
+    """
     try:
         tech = get_technician_by_user_id(current_user["id"])
         if not tech:
             raise HTTPException(status_code=400, detail="No technician profile found")
 
-        from src.utils.radar import geocode_address
-        geo_result = geocode_address(request.address)
-        latitude = geo_result["latitude"] if geo_result else None
-        longitude = geo_result["longitude"] if geo_result else None
+        from zoneinfo import ZoneInfo
+        eastern = ZoneInfo("America/New_York")
+        now = datetime.now(eastern)
+        cutoff_time = now.replace(hour=18, minute=0, second=0, microsecond=0)
 
-        start_time = datetime.fromisoformat(request.start_time)
-        end_time = start_time + timedelta(minutes=request.duration_minutes)
-
-        appt = db_create_appointment({
-            "technician_id": tech["id"],
-            "customer_name": request.customer_name,
-            "customer_phone": request.customer_phone,
-            "customer_email": request.customer_email,
-            "service_type": request.service_type,
-            "address": request.address,
-            "latitude": latitude,
-            "longitude": longitude,
-            "start_time": start_time,
-            "end_time": end_time,
-            "duration_minutes": request.duration_minutes,
-            "status": "scheduled",
-            "notes": request.notes
-        })
-
-        if not appt:
-            raise HTTPException(status_code=500, detail="Failed to create appointment")
-
-        try:
-            if request.customer_email:
-                from src.utils.mail_service import send_booking_confirmation
-                send_booking_confirmation(
-                    customer_email=request.customer_email,
-                    customer_name=request.customer_name,
-                    technician_name=tech["name"],
-                    service_type=request.service_type,
-                    start_time=str(start_time),
-                    address=request.address
-                )
-            from src.utils.mail_service import send_admin_booking_notification
-            send_admin_booking_notification(
-                customer_name=request.customer_name,
-                technician_name=tech["name"],
-                service_type=request.service_type,
-                start_time=str(start_time),
-                address=request.address
+        if now < cutoff_time:
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "success": True,
+                    "schedule_available": False,
+                    "message": "Your schedule for tomorrow will be available at 6:00 PM ET today.",
+                    "available_at": str(cutoff_time),
+                    "data": {}
+                }
             )
-        except Exception as mail_err:
-            logging.error(f"Booking email failed: {mail_err}")
+
+        tomorrow = (now + timedelta(days=1)).date()
+        tomorrow_start = datetime.combine(tomorrow, datetime.min.time())
+        tomorrow_end = datetime.combine(tomorrow, datetime.max.time())
+
+        result = get_appointments_paginated(
+            page=1,
+            page_size=50,
+            technician_id=tech["id"],
+            date_from=str(tomorrow_start),
+            date_to=str(tomorrow_end),
+            time_filter="upcoming"
+        )
+
+        appointments_out = {}
+        for a in result["appointments"]:
+            appointments_out[str(a["id"])] = {
+                "id": a["id"],
+                "service_type": a["service_type"],
+                "customer": {
+                    "name": a["customer_name"],
+                    "phone": a.get("customer_phone"),
+                    "email": a.get("customer_email")
+                },
+                "schedule": {
+                    "start_time": str(a["start_time"]),
+                    "end_time": str(a["end_time"]),
+                    "duration_minutes": a.get("duration_minutes")
+                },
+                "location": {
+                    "address": a.get("address"),
+                    "latitude": float(a["latitude"]) if a.get("latitude") else None,
+                    "longitude": float(a["longitude"]) if a.get("longitude") else None
+                },
+                "status": a["status"],
+                "notes": a.get("notes")
+            }
 
         return JSONResponse(
-            status_code=201,
+            status_code=200,
             content={
                 "success": True,
-                "message": "Appointment created",
-                "data": {
-                    "id": appt["id"],
-                    "technician_name": tech["name"],
-                    "customer_name": request.customer_name,
-                    "service_type": request.service_type,
-                    "start_time": str(start_time),
-                    "end_time": str(end_time),
-                    "status": "scheduled"
-                }
+                "schedule_available": True,
+                "schedule_date": str(tomorrow),
+                "total_appointments": len(appointments_out),
+                "data": appointments_out
             }
         )
     except HTTPException:
         raise
     except Exception as e:
-        logging.error(f"Create appointment error: {e}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail="Failed to create appointment")
+        logging.error(f"My schedule error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch schedule")
 
-
-@router.post("/my/{appointment_id}/cancel")
-async def my_cancel_appointment(
-    appointment_id: int,
-    current_user: dict = Depends(get_current_user)
-):
-    try:
-        appt = get_appointment_by_id(appointment_id)
-        if not appt:
-            raise HTTPException(status_code=404, detail="Appointment not found")
-
-        tech = get_technician_by_user_id(current_user["id"])
-        if not tech or appt["technician_id"] != tech["id"]:
-            raise HTTPException(status_code=403, detail="Not your appointment")
-
-        success = db_update_status(appointment_id, "cancelled")
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to cancel")
-
-        try:
-            if appt.get("customer_email"):
-                from src.utils.mail_service import send_cancellation_email
-                send_cancellation_email(
-                    customer_email=appt["customer_email"],
-                    customer_name=appt["customer_name"],
-                    service_type=appt["service_type"],
-                    start_time=str(appt["start_time"])
-                )
-        except Exception as mail_err:
-            logging.error(f"Cancellation email failed: {mail_err}")
-
-        return JSONResponse(
-            status_code=200,
-            content={"success": True, "message": "Appointment cancelled"}
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logging.error(f"Cancel appointment error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to cancel appointment")
 
 
 # ============================================================

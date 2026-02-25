@@ -9,12 +9,86 @@ from src.api import calendar as calendar_router
 from src.api import appointment_management
 from src.api import retell_webhooks
 from src.api import call_logs
+import os
+import logging
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+
+def send_daily_schedules():
+    """Send each technician their next-day schedule at 6 PM ET."""
+    from src.utils.db import get_all_technicians, get_appointments_paginated
+    from src.utils.mail_service import send_technician_daily_schedule
+
+    eastern = ZoneInfo("America/New_York")
+    now = datetime.now(eastern)
+    tomorrow = (now + timedelta(days=1)).date()
+    tomorrow_start = datetime.combine(tomorrow, datetime.min.time())
+    tomorrow_end = datetime.combine(tomorrow, datetime.max.time())
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    schedule_url = f"{frontend_url}/schedule"
+
+    techs = get_all_technicians()
+    logging.info(f"Sending daily schedules to {len(techs)} technicians for {tomorrow}")
+
+    for tech in techs:
+        if not tech.get("email"):
+            continue
+        try:
+            result = get_appointments_paginated(
+                page=1,
+                page_size=50,
+                technician_id=tech["id"],
+                date_from=str(tomorrow_start),
+                date_to=str(tomorrow_end),
+                time_filter="upcoming"
+            )
+            appt_list = []
+            for a in result["appointments"]:
+                appt_list.append({
+                    "start_time": str(a["start_time"]).split(" ")[1][:5] if " " in str(a["start_time"]) else str(a["start_time"]),
+                    "end_time": str(a["end_time"]).split(" ")[1][:5] if " " in str(a["end_time"]) else str(a["end_time"]),
+                    "service_type": a["service_type"],
+                    "customer_name": a["customer_name"],
+                    "customer_phone": a.get("customer_phone", ""),
+                    "address": a.get("address", "")
+                })
+
+            send_technician_daily_schedule(
+                tech_email=tech["email"],
+                tech_name=tech["name"],
+                schedule_date=str(tomorrow),
+                appointments=appt_list,
+                schedule_url=schedule_url
+            )
+            logging.info(f"Schedule sent to {tech['name']} ({tech['email']}): {len(appt_list)} appointments")
+        except Exception as e:
+            logging.error(f"Failed to send schedule to {tech['name']}: {e}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_tables()
+
+    # Start daily schedule email scheduler (6 PM ET)
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.triggers.cron import CronTrigger
+
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(
+        send_daily_schedules,
+        CronTrigger(hour=18, minute=0, timezone=ZoneInfo("America/New_York")),
+        id="daily_schedule_email",
+        name="Send technician daily schedules at 6 PM ET",
+        replace_existing=True
+    )
+    scheduler.start()
+    logging.info("Scheduler started: daily schedule emails at 6 PM ET")
+
     yield
+
+    scheduler.shutdown()
+
 
 
 app = FastAPI(title="United Home Services API", lifespan=lifespan)

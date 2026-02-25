@@ -1,11 +1,11 @@
+import logging
+from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 from src.utils.radar import geocode_address
 from src.utils.db import get_techs_with_skill, get_technician, insert_appointment_cache, delete_route_cache
 from src.utils.distance import calculate_distance, estimate_tech_location
-# GHL COMMENTED OUT - replaced by direct calendar integration
-# from src.utils.ghl import create_or_update_contact, create_appointment, check_calendar_availability
 
 router = APIRouter()
 
@@ -18,7 +18,7 @@ class VerifyAddressResponse(BaseModel):
     formatted_address: str
     latitude: float
     longitude: float
-    confidence: str
+    confidence: Optional[str] = None
 
 
 class FindTechnicianRequest(BaseModel):
@@ -65,100 +65,144 @@ class BookAppointmentResponse(BaseModel):
 
 @router.post("/verify-address", response_model=VerifyAddressResponse)
 def verify_address(request: VerifyAddressRequest):
-    result = geocode_address(request.messy_input)
-    if not result:
-        raise HTTPException(status_code=400, detail="Address not found")
+    try:
+        result = geocode_address(request.messy_input)
+        if not result:
+            raise HTTPException(status_code=400, detail="Could not verify this address. Please try a more specific address or zip code.")
 
-    return VerifyAddressResponse(
-        formatted_address=result["formatted_address"],
-        latitude=result["latitude"],
-        longitude=result["longitude"],
-        confidence=result["confidence"]
-    )
+        return VerifyAddressResponse(
+            formatted_address=result["formatted_address"],
+            latitude=result["latitude"],
+            longitude=result["longitude"],
+            confidence=result.get("confidence")
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Verify address error: {e}")
+        raise HTTPException(status_code=500, detail="Address verification failed. Please try again.")
 
 
 @router.post("/find-technician-availability", response_model=FindTechnicianResponse)
 def find_technician_availability(request: FindTechnicianRequest):
-    techs = get_techs_with_skill(request.service_type)
+    try:
+        techs = get_techs_with_skill(request.service_type)
 
-    if not techs:
+        if not techs:
+            return FindTechnicianResponse(
+                success=False,
+                available=False,
+                message="No technicians available for this service type"
+            )
+
+        tech_scores = []
+
+        for tech in techs:
+            # Skip techs without home coordinates
+            if not tech.get("home_latitude") or not tech.get("home_longitude"):
+                logging.warning(f"Tech {tech['name']} (id={tech['id']}) has no home coordinates, skipping")
+                continue
+
+            estimated_location = estimate_tech_location(tech["id"], request.requested_datetime)
+
+            if not estimated_location:
+                # Fallback to home location if estimate fails
+                estimated_location = {
+                    "latitude": float(tech["home_latitude"]),
+                    "longitude": float(tech["home_longitude"])
+                }
+
+            distance = calculate_distance(
+                estimated_location["latitude"],
+                estimated_location["longitude"],
+                request.confirmed_latitude,
+                request.confirmed_longitude
+            )
+
+            max_radius = tech.get("max_radius_miles") or 50  # Default 50mi if not set
+
+            if distance <= max_radius:
+                is_available = True
+
+                tech_scores.append({
+                    "tech": tech,
+                    "distance": distance,
+                    "available": is_available
+                })
+
+        tech_scores.sort(key=lambda x: (not x["available"], x["distance"]))
+
+        if not tech_scores:
+            # No techs in radius, but still offer the closest one
+            all_techs_with_distance = []
+            for tech in techs:
+                if not tech.get("home_latitude") or not tech.get("home_longitude"):
+                    continue
+                dist = calculate_distance(
+                    float(tech["home_latitude"]), float(tech["home_longitude"]),
+                    request.confirmed_latitude, request.confirmed_longitude
+                )
+                all_techs_with_distance.append({"tech": tech, "distance": dist})
+
+            if all_techs_with_distance:
+                all_techs_with_distance.sort(key=lambda x: x["distance"])
+                closest = all_techs_with_distance[0]
+                return FindTechnicianResponse(
+                    success=True,
+                    technician=TechnicianInfo(
+                        id=closest["tech"]["id"],
+                        name=closest["tech"]["name"],
+                        distance_miles=round(closest["distance"], 2)
+                    ),
+                    available=True,
+                    time_slot=request.requested_datetime.isoformat()
+                )
+
+            return FindTechnicianResponse(
+                success=False,
+                available=False,
+                message="No technicians available in your area right now"
+            )
+
+        best_tech = tech_scores[0]
+
+        if best_tech["available"]:
+            return FindTechnicianResponse(
+                success=True,
+                technician=TechnicianInfo(
+                    id=best_tech["tech"]["id"],
+                    name=best_tech["tech"]["name"],
+                    distance_miles=round(best_tech["distance"], 2)
+                ),
+                available=True,
+                time_slot=request.requested_datetime.isoformat()
+            )
+        else:
+            alternative_slots = []
+            base_time = request.requested_datetime
+            for i in range(1, 4):
+                alt_time = base_time + timedelta(hours=i)
+                alternative_slots.append(alt_time.isoformat())
+
+            return FindTechnicianResponse(
+                success=True,
+                technician=TechnicianInfo(
+                    id=best_tech["tech"]["id"],
+                    name=best_tech["tech"]["name"],
+                    distance_miles=round(best_tech["distance"], 2)
+                ),
+                available=False,
+                alternative_slots=alternative_slots
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Find technician availability error: {e}")
         return FindTechnicianResponse(
             success=False,
             available=False,
-            message="No technicians available for this service type"
+            message="Error checking availability. Please try again."
         )
-
-    tech_scores = []
-
-    for tech in techs:
-        estimated_location = estimate_tech_location(tech["id"], request.requested_datetime)
-
-        if not estimated_location:
-            continue
-
-        distance = calculate_distance(
-            estimated_location["latitude"],
-            estimated_location["longitude"],
-            request.confirmed_latitude,
-            request.confirmed_longitude
-        )
-
-        if distance <= tech["max_radius_miles"]:
-            # GHL COMMENTED OUT - will be replaced by direct calendar check
-            # is_available = check_calendar_availability(
-            #     tech["ghl_calendar_id"],
-            #     request.requested_datetime,
-            #     60
-            # )
-            is_available = True
-
-            tech_scores.append({
-                "tech": tech,
-                "distance": distance,
-                "available": is_available
-            })
-
-    tech_scores.sort(key=lambda x: (not x["available"], x["distance"]))
-
-    if not tech_scores:
-        return FindTechnicianResponse(
-            success=False,
-            available=False,
-            message="No technicians within service radius"
-        )
-
-    best_tech = tech_scores[0]
-
-    if best_tech["available"]:
-        return FindTechnicianResponse(
-            success=True,
-            technician=TechnicianInfo(
-                id=best_tech["tech"]["id"],
-                name=best_tech["tech"]["name"],
-                distance_miles=round(best_tech["distance"], 2)
-            ),
-            available=True,
-            time_slot=request.requested_datetime.isoformat()
-        )
-    else:
-        alternative_slots = []
-        base_time = request.requested_datetime
-        for i in range(1, 4):
-            alt_time = base_time + timedelta(hours=i)
-            alternative_slots.append(alt_time.isoformat())
-
-        return FindTechnicianResponse(
-            success=True,
-            technician=TechnicianInfo(
-                id=best_tech["tech"]["id"],
-                name=best_tech["tech"]["name"],
-                distance_miles=round(best_tech["distance"], 2)
-            ),
-            available=False,
-            alternative_slots=alternative_slots
-        )
-
-
 @router.post("/book-appointment", response_model=BookAppointmentResponse)
 def book_appointment(request: BookAppointmentRequest):
     tech = get_technician(request.technician_id)

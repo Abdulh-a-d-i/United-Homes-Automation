@@ -26,12 +26,12 @@
     "conversationFlow": {
         "conversation_flow_id": "conversation_flow_97128821c953",
         "version": 0,
-        "global_prompt": "You are Alex, a professional AI receptionist for United Home Services in Metro Charlotte.\n\nSERVICES: Chimney Cleaning ($249), Dryer Vent Cleaning ($149), Gutter Cleaning ($199), Power Washing ($299), Air Duct Cleaning ($399/system).\n\nRULES:\n- Always call required tools when indicated. Retry tool calls up to 2 times if they fail.\n- If user asks any question about services, refer to the Knowledge Base before answering.\n- If user is angry or asks for a human, use transfer_call immediately.\n- Be concise, professional, and friendly.",
+        "global_prompt": "You are Alex, AI receptionist for United Home Services, Metro Charlotte.\n\nSERVICES: Chimney ($249), Dryer Vent ($149), Gutter ($199), Power Washing ($299), Air Duct ($399/system).\n\nRULES:\n- Retry failed tool calls up to 2 times.\n- For ANY service question, pricing, or complaint scenario, ALWAYS check the Knowledge Base FIRST.\n- Never admit fault. Never discuss refunds. Escalate early for damage/safety.\n- If user is angry or asks for a human, transfer immediately.\n- Be concise, professional, warm.",
         "nodes": [
             {
                 "instruction": {
                     "type": "prompt",
-                    "text": "Start by saying: \"Thank you for calling United Home Services, this is Alex. How can I help you today?\"\n\nThen classify their intent:\n- New service/booking keywords (quote, price, book, schedule, cost) -> transition to Sales_State\n- Existing issue keywords (complain, issue, redo, fix, cancel, problem) -> transition to Support_State\n- If unclear, ask: \"Are you looking to book a new service or calling about a past job?\"\n\nFor any service questions, check the Knowledge Base first."
+                    "text": "Say: \"Thank you for calling United Home Services, this is Alex. How can I help you today?\"\nRoute: new service -> Sales_State, existing issue -> Support_State.\nIf unclear: \"Are you looking to book a new service or calling about a past job?\""
                 },
                 "model_choice": {
                     "type": "cascading",
@@ -81,7 +81,7 @@
             {
                 "instruction": {
                     "type": "prompt",
-                    "text": "You are the Sales Agent. Follow these steps IN ORDER:\n\n1. IDENTIFY SERVICE: Ask what service they need. Match to our 5 services.\n2. GET ADDRESS: Ask for their address or zip code.\n3. CALL TOOL: Immediately call verify_address with their input. If tool fails, retry once.\n4. CONFIRM: Read back the formatted address. If wrong, ask again and re-call tool.\n5. QUOTE PRICE: State the price. Ask if it works.\n6. HANDLE OBJECTIONS:\n   - Military/Senior: Offer 10% off immediately.\n   - Air Duct hesitant: First offer 10% off. If still hesitant, offer flat $199/system.\n   - Gutter/Power Washing hesitant: Offer 10% off.\n   - Chimney/Dryer Vent: No discount, reiterate value.\n7. Once price agreed -> transition to Availability_State.\n\nFor any service questions, check the Knowledge Base."
+                    "text": "1. Ask what service they need. Match to one of our 5 services. Check KB for pricing.\n2. Ask for address -> call verify_address tool. Read back formatted address, confirm with customer.\n3. Quote the KB price. Ask if it works for them.\n4. DISCOUNT FLOW if hesitant:\n   a. First: Ask if military/veteran/senior in household -> 10% off all services.\n   b. If still hesitant:\n      - Chimney/Dryer Vent: No further discount. Reiterate value and competitive pricing.\n      - Air Duct: Say 'Let me check with my manager', pause 3 seconds, offer additional 10% off. If STILL hesitant, pause 5 seconds, offer flat $199/system as final offer.\n      - Gutter/Power Washing: Say 'Let me check with my manager', pause 3 seconds, offer additional 10% off.\n5. Price agreed -> transition to Availability_State.\nCheck KB for all pricing and discount details."
                 },
                 "model_choice": {
                     "type": "cascading",
@@ -118,7 +118,7 @@
             {
                 "instruction": {
                     "type": "prompt",
-                    "text": "Categorize the complaint using TIER logic:\n\nTIER 1 - EXPLAIN (no visit needed):\n- Cosmetic/environmental issues: streaks after drying, odor after rain, soot from first fire, debris after storm, dryer interior not cleaned.\n- Empathize and explain it's normal behavior. Do NOT book.\n\nTIER 2 - REDO (free re-service):\n- Workmanship issues: missed spots, residue left, still clogged, lint still blowing, debris left in yard.\n- Apologize and transition to Redo_Booking_State.\n\nTIER 3 - ESCALATE (transfer to human):\n- Safety/damage/money: leak, property damage, burning smell, refund, insurance, lawyer.\n- Transfer immediately.\n\nFor any questions about our services or policies, check the Knowledge Base."
+                    "text": "Identify the service the complaint is about, then check KB for the exact scenario.\n\nTier 1 EXPLAIN (no visit): Expectation/cosmetic/environmental issues. Empathize, explain using KB answers. Never admit fault.\nTier 2 REDO (free): Missed work, incomplete cleaning, workmanship issues per KB list -> apologize, go to Redo_Booking_State.\nTier 3 ESCALATE: Any damage, safety, money/refund, legal keywords -> transfer to human immediately.\n\nFor tech behavior complaints (late, rushed, rude, no shoe covers): apologize and ask if they'd like to speak to a human.\nALWAYS check KB for the specific service + scenario before responding."
                 },
                 "name": "Support_State",
                 "model_choice": {
@@ -214,7 +214,7 @@
             {
                 "instruction": {
                     "type": "prompt",
-                    "text": "You are the Scheduling Coordinator. You have the verified address and service type from context.\n\n1. Ask when they'd like the appointment. If vague, ask for a specific day and time of day.\n2. Once they give a time, CALL check_technician_availability tool. If tool fails, retry once.\n3. If available: Confirm the time. If user agrees -> transition to Book_State.\n4. If busy: Offer the alternative slots from the tool response.\n5. NEVER say a time is available without calling the tool first.\n\nFor any questions, check the Knowledge Base."
+                    "text": "Ask preferred date/time. Call check_technician_availability. If available and agreed -> Book_State. If busy, offer alternative_slots from response. Never confirm without calling tool first."
                 },
                 "model_choice": {
                     "type": "cascading",
@@ -251,7 +251,7 @@
             {
                 "instruction": {
                     "type": "prompt",
-                    "text": "You are the Booking Specialist. You already have: verified address, agreed time slot, service type from context.\n\n1. Get customer's full name (if not already known).\n2. Get phone number.\n3. CALL book_appointment tool immediately. If tool fails, retry once.\n4. On success: Read back the FULL confirmation to the caller: \"You're all set! I've booked your [service_type] appointment at [address] on [date and time]. Your technician will be [technician_name]. We'll send a confirmation text to [phone_number]. Is there anything else I can help you with?\"\n5. On error: Say \"I've recorded your details and our team will text you a manual confirmation shortly.\"\n6. After confirmation, transition to End Call.\n\nDo NOT ask for address or time again."
+                    "text": "Get name and phone if missing. Call book_appointment. On success say: \"You're all set! [service] at [address] on [date/time] with [tech_name]. We'll text confirmation to [phone].\" On error: \"We've recorded your details, we'll text you a confirmation shortly.\" Then end call."
                 },
                 "model_choice": {
                     "type": "cascading",
@@ -354,7 +354,7 @@
             {
                 "instruction": {
                     "type": "prompt",
-                    "text": "Customer has a valid redo claim.\n\n1. Ask for their Order ID or Invoice Number. If they don't have it, ask for their phone number instead.\n2. CALL book_redo_appointment tool with order_id and issue_description. If tool fails, retry once.\n3. On success: Confirm the redo date and address from tool response. End call.\n4. On error: Transfer to human agent.\n\nThis is a FREE re-service. Do NOT mention any charge."
+                    "text": "Ask for Order ID or phone number. Call book_redo_appointment with order_id + issue_description. On success: confirm redo date/address from response. On error: transfer to human. This is FREE, no charge."
                 },
                 "model_choice": {
                     "type": "cascading",
@@ -413,7 +413,7 @@
                 "query_params": {},
                 "description": "Verifies and geocodes a messy address into structured data.",
                 "type": "custom",
-                "url": "http://161.118.168.134:8000/api/appointments/verify-address",
+                "url": "http://3.231.241.26:8000/api/appointments/verify-address",
                 "tool_id": "tool-1770754076296",
                 "args_at_root": true,
                 "timeout_ms": 20000,
@@ -443,7 +443,7 @@
                 "query_params": {},
                 "description": "Finds the nearest available technician for the requested service, location, and time.",
                 "type": "custom",
-                "url": "http://161.118.168.134:8000/api/appointments/find-technician-availability",
+                "url": "http://3.231.241.26:8000/api/appointments/find-technician-availability",
                 "tool_id": "tool-1770754520685",
                 "args_at_root": true,
                 "timeout_ms": 20000,
@@ -490,7 +490,7 @@
                 "query_params": {},
                 "description": "Books the appointment with all collected data.",
                 "type": "custom",
-                "url": "http://161.118.168.134:8000/api/appointments/book-appointment",
+                "url": "http://3.231.241.26:8000/api/appointments/book-appointment",
                 "tool_id": "tool-1770642855470",
                 "args_at_root": true,
                 "timeout_ms": 20000,
@@ -564,7 +564,7 @@
                 "query_params": {},
                 "description": "Cancels the customer's upcoming appointment by their phone number.",
                 "type": "custom",
-                "url": "http://161.118.168.134:8000/api/appointments/cancel-appointment",
+                "url": "http://3.231.241.26:8000/api/appointments/cancel-appointment",
                 "tool_id": "tool-1770643690091",
                 "args_at_root": true,
                 "timeout_ms": 20000,
@@ -594,7 +594,7 @@
                 "query_params": {},
                 "description": "Books a free redo appointment using Order ID or phone number lookup.",
                 "type": "custom",
-                "url": "http://161.118.168.134:8000/api/appointments/book-redo-appointment",
+                "url": "http://3.231.241.26:8000/api/appointments/book-redo-appointment",
                 "tool_id": "tool-1771254788507",
                 "args_at_root": true,
                 "timeout_ms": 20000,
