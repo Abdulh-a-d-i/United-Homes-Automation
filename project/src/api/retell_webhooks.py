@@ -1,9 +1,14 @@
+"""Retell webhook handler -- processes call events and injects dynamic variables."""
 import os
 import json
 import logging
 import traceback
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse
+
 from src.utils.db import upsert_call_log
 from dotenv import load_dotenv
 
@@ -19,11 +24,26 @@ if RETELL_API_KEY:
         from retell import Retell
         retell_client = Retell(api_key=RETELL_API_KEY)
     except Exception as e:
-        logging.warning(f"Retell SDK init failed: {e}")
+        logging.warning("Retell SDK init failed: %s", e)
+
+
+def _get_current_date_string():
+    """Return the current date/time in Eastern Time as a human-readable string.
+
+    Example: 'Tuesday, February 25, 2026. Current time: 3:45 PM ET'
+    """
+    eastern = ZoneInfo("America/New_York")
+    now = datetime.now(eastern)
+    return now.strftime("%A, %B %d, %Y. Current time: %I:%M %p ET")
 
 
 @router.post("/retell")
 async def retell_webhook(request: Request):
+    """Handle Retell webhook events.
+
+    On call_started: returns dynamic variables including current_date.
+    On call_ended/call_analyzed: stores the call log in the database.
+    """
     try:
         post_data = await request.json()
     except Exception:
@@ -40,7 +60,7 @@ async def retell_webhook(request: Request):
                 logging.warning("Invalid Retell webhook signature")
                 return JSONResponse(status_code=401, content={"message": "Unauthorized"})
         except Exception as e:
-            logging.warning(f"Signature verification error: {e}")
+            logging.warning("Signature verification error: %s", e)
             return JSONResponse(status_code=401, content={"message": "Signature verification failed"})
 
     event = post_data.get("event")
@@ -49,8 +69,22 @@ async def retell_webhook(request: Request):
     if not event or not call.get("call_id"):
         return JSONResponse(status_code=200, content={"message": "ok"})
 
-    logging.info(f"Retell webhook: {event} for call {call.get('call_id')}")
+    logging.info("Retell webhook: %s for call %s", event, call.get("call_id"))
 
+    # On call_started, inject dynamic variables including today's date
+    if event == "call_started":
+        current_date = _get_current_date_string()
+        logging.info(
+            "Injecting current_date for call %s: %s",
+            call.get("call_id"), current_date,
+        )
+        return JSONResponse(status_code=200, content={
+            "retell_llm_dynamic_variables": {
+                "current_date": current_date,
+            }
+        })
+
+    # For call_ended and call_analyzed, store the call log
     call_data = {
         "call_id": call.get("call_id"),
         "agent_id": call.get("agent_id"),
@@ -66,7 +100,7 @@ async def retell_webhook(request: Request):
         "transcript": call.get("transcript"),
         "transcript_object": call.get("transcript_object"),
         "metadata": call.get("metadata"),
-        "retell_llm_dynamic_variables": call.get("retell_llm_dynamic_variables")
+        "retell_llm_dynamic_variables": call.get("retell_llm_dynamic_variables"),
     }
 
     if event == "call_analyzed":
@@ -75,7 +109,7 @@ async def retell_webhook(request: Request):
     try:
         upsert_call_log(call_data)
     except Exception as e:
-        logging.error(f"Failed to store call log: {e}")
+        logging.error("Failed to store call log: %s", e)
         traceback.print_exc()
 
     return JSONResponse(status_code=200, content={"message": "ok"})
