@@ -1,4 +1,5 @@
 import os
+import logging
 import requests
 from dotenv import load_dotenv
 
@@ -7,24 +8,41 @@ load_dotenv()
 
 def geocode_address(messy_address):
     url = "https://api.radar.io/v1/geocode/forward"
-    headers = {
-        "Authorization": os.getenv("RADAR_API_KEY")
-    }
-    params = {
-        "query": messy_address
-    }
-    
-    response = requests.get(url, headers=headers, params=params)
-    
-    if response.status_code == 200:
-        data = response.json()
-        if data.get("addresses") and len(data["addresses"]) > 0:
-            address_data = data["addresses"][0]
-            return {
-                "formatted_address": address_data.get("formattedAddress"),
-                "latitude": address_data.get("latitude"),
-                "longitude": address_data.get("longitude"),
-                "confidence": address_data.get("confidence")
-            }
-    
+    api_key = os.getenv("RADAR_API_KEY")
+
+    logging.info(f"[RADAR] Geocoding address: '{messy_address}'")
+    logging.info(f"[RADAR] API key present: {bool(api_key)}, key prefix: {api_key[:8] + '...' if api_key else 'MISSING'}")
+
+    headers = {"Authorization": api_key}
+    params = {"query": messy_address}
+
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        logging.info(f"[RADAR] Response status: {response.status_code}")
+
+        if response.status_code == 200:
+            data = response.json()
+            addresses = data.get("addresses", [])
+            logging.info(f"[RADAR] Found {len(addresses)} address results")
+
+            if addresses:
+                addr = addresses[0]
+                result = {
+                    "formatted_address": addr.get("formattedAddress"),
+                    "latitude": addr.get("latitude"),
+                    "longitude": addr.get("longitude"),
+                    "confidence": addr.get("confidence")
+                }
+                logging.info(f"[RADAR] Result: {result['formatted_address']} ({result['latitude']}, {result['longitude']}) confidence={result['confidence']}")
+                return result
+            else:
+                logging.warning(f"[RADAR] No addresses found for: '{messy_address}'")
+        else:
+            logging.error(f"[RADAR] API error {response.status_code}: {response.text[:200]}")
+
+    except requests.exceptions.Timeout:
+        logging.error(f"[RADAR] Request timed out for: '{messy_address}'")
+    except Exception as e:
+        logging.error(f"[RADAR] Exception: {e}")
+
     return None

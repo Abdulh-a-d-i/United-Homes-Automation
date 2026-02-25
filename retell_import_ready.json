@@ -204,7 +204,7 @@
                 "id": "node-1770643694251",
                 "type": "function",
                 "tool_type": "local",
-                "speak_during_execution": false,
+                "speak_during_execution": true,
                 "display_position": {
                     "x": 1800.8683359281813,
                     "y": 1452.6433169419415
@@ -300,7 +300,7 @@
                 "id": "node-1770755689709",
                 "type": "function",
                 "tool_type": "local",
-                "speak_during_execution": false,
+                "speak_during_execution": true,
                 "display_position": {
                     "x": 774.9770950267863,
                     "y": 631.4298604577001
@@ -322,7 +322,7 @@
                 "id": "node-1770755722581",
                 "type": "function",
                 "tool_type": "local",
-                "speak_during_execution": false,
+                "speak_during_execution": true,
                 "display_position": {
                     "x": 1245.0901376559452,
                     "y": 737.8524391137191
@@ -344,7 +344,7 @@
                 "id": "node-1770755792494",
                 "type": "function",
                 "tool_type": "local",
-                "speak_during_execution": false,
+                "speak_during_execution": true,
                 "display_position": {
                     "x": 1788.456245767616,
                     "y": 685.7250058938187
@@ -395,7 +395,7 @@
                 "id": "node-1771254791814",
                 "type": "function",
                 "tool_type": "local",
-                "speak_during_execution": false,
+                "speak_during_execution": true,
                 "display_position": {
                     "x": 1609.1551590004196,
                     "y": 1168.0161456544927

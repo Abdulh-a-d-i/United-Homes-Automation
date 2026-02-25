@@ -210,59 +210,54 @@ def find_technician_availability(request: FindTechnicianRequest):
         )
 @router.post("/book-appointment", response_model=BookAppointmentResponse)
 def book_appointment(request: BookAppointmentRequest):
-    tech = get_technician(request.technician_id)
+    logging.info(f"[BOOKING] Request: customer={request.customer_name}, phone={request.customer_phone}, tech_id={request.technician_id}, service={request.service_type}, time={request.start_time}, address={request.address}")
 
-    if not tech:
-        raise HTTPException(status_code=404, detail="Technician not found")
+    try:
+        tech = get_technician(request.technician_id)
+        logging.info(f"[BOOKING] Tech lookup: {'found ' + tech['name'] if tech else 'NOT FOUND'} (id={request.technician_id})")
 
-    end_time = request.start_time + timedelta(minutes=request.duration_minutes)
+        if not tech:
+            raise HTTPException(status_code=404, detail="Technician not found")
 
-    # GHL COMMENTED OUT - replaced by direct calendar integration
-    # contact_id = create_or_update_contact(
-    #     request.customer_name,
-    #     request.customer_phone,
-    #     request.customer_email
-    # )
-    # if not contact_id:
-    #     raise HTTPException(status_code=500, detail="Failed to create contact")
-    #
-    # appointment_id = create_appointment(
-    #     tech["ghl_calendar_id"],
-    #     contact_id,
-    #     f"{request.service_type} - {request.customer_name}",
-    #     request.start_time,
-    #     end_time,
-    #     request.address
-    # )
-    # if not appointment_id:
-    #     raise HTTPException(status_code=500, detail="Failed to create appointment")
+        end_time = request.start_time + timedelta(minutes=request.duration_minutes)
 
-    import uuid
-    appointment_id = str(uuid.uuid4())
+        import uuid
+        appointment_id = str(uuid.uuid4())
+        logging.info(f"[BOOKING] Generated appointment_id={appointment_id}")
 
-    insert_appointment_cache(
-        appointment_id,
-        request.technician_id,
-        request.customer_name,
-        request.customer_phone,
-        request.service_type,
-        request.address,
-        request.latitude,
-        request.longitude,
-        request.start_time,
-        end_time,
-        "scheduled"
-    )
+        insert_appointment_cache(
+            appointment_id,
+            request.technician_id,
+            request.customer_name,
+            request.customer_phone,
+            request.service_type,
+            request.address,
+            request.latitude,
+            request.longitude,
+            request.start_time,
+            end_time,
+            "scheduled"
+        )
 
-    delete_route_cache(request.technician_id, request.start_time.date())
+        delete_route_cache(request.technician_id, request.start_time.date())
 
-    return BookAppointmentResponse(
-        success=True,
-        appointment_id=appointment_id,
-        technician=tech["name"],
-        time=request.start_time.isoformat(),
-        message=f"Appointment booked with {tech['name']} at {request.start_time.isoformat()}"
-    )
+        logging.info(f"[BOOKING] SUCCESS: {request.customer_name} booked with {tech['name']} for {request.service_type} at {request.start_time}")
+
+        return BookAppointmentResponse(
+            success=True,
+            appointment_id=appointment_id,
+            technician=tech["name"],
+            time=request.start_time.isoformat(),
+            message=f"Appointment booked with {tech['name']}"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"[BOOKING] ERROR: {e}")
+        return BookAppointmentResponse(
+            success=False,
+            message=f"Failed to book appointment: {str(e)}"
+        )
 
 
 class CancelByPhoneRequest(BaseModel):
