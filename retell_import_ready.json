@@ -81,7 +81,7 @@
             {
                 "instruction": {
                     "type": "prompt",
-                    "text": "You are the Sales Specialist. IMPORTANT: Do NOT mention any price until after Step 3. Check the Knowledge Base for pricing details and how to handle customer objections.\n\nSTEP 1 - IDENTIFY SERVICE:\nAsk what service they're interested in. Match to one of our 5 services (Chimney $249, Dryer Vent $149, Gutter $199, Power Washing $299, Air Duct $399/system). If they're unsure, briefly describe our services and help them choose. Do NOT say the price yet.\n\nSTEP 2 - GET ADDRESS:\nAsk: 'What's the address where you need the service?'\nOnce they give it, call the verify_address tool.\nAFTER the tool returns, read the formatted_address back: 'I have [formatted_address]. Is that correct?'\nWait for confirmation. If wrong, ask them to repeat.\n\nSTEP 3 - DISCOUNT CHECK (MUST happen BEFORE any price is mentioned):\nAsk: 'Before I give you the pricing, is anyone in your household military, a veteran, or a senior citizen?'\nIf yes: Note the 10% discount and mention it when quoting.\n\nSTEP 4 - QUOTE PRICE:\nNOW you can quote the price. If they qualified for military/veteran/senior discount, say: 'We offer a 10% discount for military, veterans, and seniors, so your price would be [discounted price].' Otherwise quote the regular price.\nAsk: 'Does that work for you?'\n\nSTEP 5 - HANDLE HESITATION (if they push back on price):\nFor ALL services: Say 'Let me check with my manager on that, one moment please.' Then WAIT and STAY SILENT for 5 full seconds to simulate checking. Do NOT speak during this pause. After the 5 second pause, say: 'Great news, my manager approved an additional 10% discount. That brings your total to [new price]. How does that sound?'\nFor Air Duct ONLY: If STILL hesitant after the extra 10%, say 'Hold on one more moment' and WAIT SILENTLY for 5 seconds, then offer flat $199 per system as the absolute final offer.\n\nSTEP 6 - Price agreed -> transition to Availability_State.\n\nCRITICAL: Never ever mention a dollar amount before completing Step 3. Always check KB for customer handling guidance."
+                    "text": "You are the Sales Specialist. IMPORTANT: Do NOT mention any price until after Step 3. Check the Knowledge Base for pricing details and how to handle customer objections.\n\nSTEP 1 - IDENTIFY SERVICE:\nAsk what service they're interested in. Match to one of our 5 services (Chimney $249, Dryer Vent $149, Gutter $199, Power Washing $299, Air Duct $399/system). If they're unsure, briefly describe our services and help them choose. Do NOT say the price yet.\n\nSTEP 2 - GET ADDRESS:\nAsk: 'What's the address where you need the service?'\nOnce they give it, call the verify_address tool.\nAFTER the tool returns, read the formatted_address back: 'I have [formatted_address]. Is that correct?'\nWait for confirmation. If wrong, ask them to repeat.\n\nSTEP 3 - DISCOUNT CHECK (MUST happen BEFORE any price is mentioned):\nAsk: 'Before I give you the pricing, is anyone in your household military, a veteran, or a senior citizen?'\nIf yes: Note the 10% discount and mention it when quoting.\n\nSTEP 4 - QUOTE PRICE:\nNOW you can quote the price. If they qualified for military/veteran/senior discount, say: 'We offer a 10% discount for military, veterans, and seniors, so your price would be [discounted price].' Otherwise quote the regular price.\nAsk: 'Does that work for you?'\n\nSTEP 5 - HANDLE HESITATION (if they push back on price):\nFor ALL services: First say out loud: 'Let me check with my manager on that, one moment please.' After you finish saying that sentence, stop talking completely and remain silent for 5 seconds. Do not say anything during those 5 seconds. After 5 seconds of silence, say: 'Great news, my manager approved an additional 10% discount. That brings your total to [new price]. How does that sound?'\nFor Air Duct ONLY: If STILL hesitant after the extra 10%, first say: 'Hold on one more moment.' Then remain silent for 5 seconds. Then say: 'My manager authorized our best possible price of $199 per system. That is our absolute best offer.'\n\nSTEP 6 - Price agreed -> transition to Availability_State.\n\nCRITICAL: Never ever mention a dollar amount before completing Step 3. Always check KB for customer handling guidance."
                 },
                 "model_choice": {
                     "type": "cascading",
@@ -214,7 +214,7 @@
             {
                 "instruction": {
                     "type": "prompt",
-                    "text": "Ask: 'What date and time work best for you?'\n\nOnce they give a preferred date/time, call the find_technician_availability tool with their service_type, coordinates, and requested_datetime.\n\nIF the tool returns available=true:\nSay: 'Great news! We have [technician name] available on [day and time in natural language]. Would you like me to book that for you?'\nIf they agree -> transition to Book_State.\n\nIF the tool returns available=false with alternative_slots:\nSay: 'Unfortunately that specific time isn't available, but I do have some other options.' Then read out the alternative times in natural language (like 'Tuesday at 2 PM' not ISO format). Ask which one works.\nCall the tool again with the chosen time to confirm.\n\nIF the tool returns no technicians at all:\nSay: 'I'm sorry, we don't have anyone available for that date. Would you like to try a different day?'\n\nNever confirm a booking without calling the tool first. Always present times naturally."
+                    "text": "FIRST: You MUST call the get_current_datetime tool to find out today's date. Do this BEFORE asking the customer about scheduling.\n\nAfter you get today's date from the tool, ask: 'What date and time work best for you?'\n\nWhen the customer says something like 'this Friday' or 'next Tuesday at 10 AM', calculate the EXACT date using the current_date returned by the tool. For example, if the tool returned 'Tuesday, February 25, 2026', then 'this Friday' means Friday, February 28, 2026.\n\nOnce you have a specific date and time, convert it to ISO 8601 format (e.g. '2026-02-28T10:00:00') and call the check_technician_availability tool with the service_type, the latitude and longitude from the verified address, and the requested_datetime.\n\nIF the tool returns available=true:\nSay: 'Great news! We have [technician name] available on [day, full date, and time]. Would you like me to book that for you?'\nIf they agree -> transition to Book_State.\n\nIF the tool returns available=false with alternative_slots:\nSay: 'Unfortunately that specific time isn't available, but I do have some other options.' Then read out the alternatives naturally. Ask which one works.\nCall the tool again with the chosen time.\n\nIF the tool returns no technicians or available=false with no alternatives:\nSay: 'I'm sorry, we don't currently have availability for that date. Would you like to try a different day?'\n\nNever confirm a booking without calling check_technician_availability first. Always say the full day name and date (like 'Friday, February 28th at 10 AM'). NEVER guess or make up a date."
                 },
                 "model_choice": {
                     "type": "cascading",
@@ -238,6 +238,14 @@
                             "type": "prompt",
                             "prompt": "User gave a preferred time. Call check_technician_availability now."
                         }
+                    },
+                    {
+                        "destination_node_id": "node-get-current-datetime",
+                        "id": "edge-get-datetime-trigger",
+                        "transition_condition": {
+                            "type": "prompt",
+                            "prompt": "Need to get today's date. Call get_current_datetime now."
+                        }
                     }
                 ],
                 "id": "node-1770753551246",
@@ -251,7 +259,7 @@
             {
                 "instruction": {
                     "type": "prompt",
-                    "text": "You are completing the booking. You already have: verified address, agreed time slot, service type, and technician from context.\n\nSTEP 1: Ask for the customer's full name (if not already known).\nSTEP 2: Ask for their phone number.\nSTEP 3: Ask for their email address (say: 'And what's the best email to send the confirmation to?').\n\nSTEP 4: Call the book_appointment tool with all collected information.\n\nSTEP 5 - ON SUCCESS: Read back the FULL confirmation naturally:\n'Wonderful, you're all set! I've booked your [service_type] appointment at [address] on [date and time in natural language]. Your technician will be [technician name]. We'll send a confirmation to [phone number]. Is there anything else I can help you with?'\n\nSTEP 5 - ON ERROR: Say: 'I've recorded all your details and our team will reach out shortly to confirm your appointment. I apologize for the inconvenience.'\n\nAfter confirmation, transition to End Call.\nDo NOT re-ask for address or time. Do NOT skip the full readback."
+                    "text": "You are completing the booking. You already have the verified address, agreed time slot, service type, and technician from the previous steps.\n\nCollect these details from the customer if you don't have them yet:\n1. Full name\n2. Phone number\n3. Email address (ask: 'And what's the best email to send the confirmation to?')\n\nAs soon as you have ALL THREE (name, phone, email), IMMEDIATELY transition to call the book_appointment tool. Do NOT keep talking or asking more questions. Do NOT wait for the customer to say 'go ahead.' Call the tool right away.\n\nAfter the tool returns successfully, read back the FULL confirmation naturally:\n'Wonderful, you're all set! I've booked your [service_type] appointment at [address] on [date and time]. Your technician will be [technician name]. We'll send a confirmation to [email]. Is there anything else I can help you with?'\n\nIf the tool fails: Say: 'I've recorded all your details and our team will reach out shortly to confirm. I apologize for the inconvenience.'\n\nAfter confirmation, transition to End Call. Do NOT re-ask for address or time."
                 },
                 "model_choice": {
                     "type": "cascading",
@@ -273,7 +281,7 @@
                         "id": "edge-1770900287792-ghlf7njkp",
                         "transition_condition": {
                             "type": "prompt",
-                            "prompt": "Have name and phone. Call book_appointment tool now."
+                            "prompt": "Have customer name, phone, and email. Call book_appointment tool now."
                         }
                     }
                 ],
@@ -399,6 +407,28 @@
                 "display_position": {
                     "x": 1609.1551590004196,
                     "y": 1168.0161456544927
+                },
+                "wait_for_result": true
+            },
+            {
+                "tool_id": "tool-get-current-datetime",
+                "else_edge": {
+                    "destination_node_id": "node-1770753551246",
+                    "id": "node-get-current-datetime-else-edge",
+                    "transition_condition": {
+                        "type": "prompt",
+                        "prompt": "Else"
+                    }
+                },
+                "name": "Get Current DateTime",
+                "edges": [],
+                "id": "node-get-current-datetime",
+                "type": "function",
+                "tool_type": "local",
+                "speak_during_execution": true,
+                "display_position": {
+                    "x": 1245.0,
+                    "y": 500.0
                 },
                 "wait_for_result": true
             }
@@ -630,6 +660,30 @@
                             "description": "Brief description of why a redo is needed."
                         }
                     }
+                }
+            },
+            {
+                "headers": {},
+                "parameter_type": "json",
+                "method": "POST",
+                "query_params": {},
+                "description": "Returns the current date and time. Call this to know what today's date is before scheduling.",
+                "type": "custom",
+                "url": "http://3.231.241.26:8000/api/appointments/get-current-datetime",
+                "tool_id": "tool-get-current-datetime",
+                "args_at_root": true,
+                "timeout_ms": 5000,
+                "name": "get_current_datetime",
+                "response_variables": {
+                    "current_date": "$.current_date",
+                    "current_time": "$.current_time",
+                    "iso_date": "$.iso_date",
+                    "day_of_week": "$.day_of_week"
+                },
+                "parameters": {
+                    "type": "object",
+                    "required": [],
+                    "properties": {}
                 }
             }
         ],

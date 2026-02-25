@@ -1,6 +1,7 @@
 import logging
 import uuid
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -12,6 +13,19 @@ from src.utils.distance import calculate_distance, estimate_tech_location
 from src.utils.api_key_auth import verify_retell_api_key
 
 router = APIRouter()
+
+
+@router.post("/get-current-datetime")
+def get_current_datetime(_auth=Depends(verify_retell_api_key)):
+    """Return the current date and time in Eastern Time for the agent."""
+    eastern = ZoneInfo("America/New_York")
+    now = datetime.now(eastern)
+    return {
+        "current_date": now.strftime("%A, %B %d, %Y"),
+        "current_time": now.strftime("%I:%M %p ET"),
+        "iso_date": now.strftime("%Y-%m-%d"),
+        "day_of_week": now.strftime("%A"),
+    }
 
 
 class VerifyAddressRequest(BaseModel):
