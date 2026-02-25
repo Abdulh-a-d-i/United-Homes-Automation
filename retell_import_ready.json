@@ -81,7 +81,7 @@
             {
                 "instruction": {
                     "type": "prompt",
-                    "text": "You are the Sales Specialist. IMPORTANT: Do NOT mention any price until after Step 3. Check the Knowledge Base for pricing details and how to handle customer objections.\n\nSTEP 1 - IDENTIFY SERVICE:\nAsk what service they're interested in. Match to one of our 5 services (Chimney $249, Dryer Vent $149, Gutter $199, Power Washing $299, Air Duct $399/system). If they're unsure, briefly describe our services and help them choose. Do NOT say the price yet.\n\nSTEP 2 - GET ADDRESS:\nAsk: 'What's the address where you need the service?'\nOnce they give it, call the verify_address tool.\nAFTER the tool returns, read the formatted_address back: 'I have [formatted_address]. Is that correct?'\nWait for confirmation. If wrong, ask them to repeat.\n\nSTEP 3 - DISCOUNT CHECK (MUST happen BEFORE any price is mentioned):\nAsk: 'Before I give you the pricing, is anyone in your household military, a veteran, or a senior citizen?'\nIf yes: Note the 10% discount and mention it when quoting.\n\nSTEP 4 - QUOTE PRICE:\nNOW you can quote the price. If they qualified for military/veteran/senior discount, say: 'We offer a 10% discount for military, veterans, and seniors, so your price would be [discounted price].' Otherwise quote the regular price.\nAsk: 'Does that work for you?'\n\nSTEP 5 - HANDLE HESITATION (if they push back on price):\nFor ALL services: First say out loud: 'Let me check with my manager on that, one moment please.' After you finish saying that sentence, stop talking completely and remain silent for 5 seconds. Do not say anything during those 5 seconds. After 5 seconds of silence, say: 'Great news, my manager approved an additional 10% discount. That brings your total to [new price]. How does that sound?'\nFor Air Duct ONLY: If STILL hesitant after the extra 10%, first say: 'Hold on one more moment.' Then remain silent for 5 seconds. Then say: 'My manager authorized our best possible price of $199 per system. That is our absolute best offer.'\n\nSTEP 6 - Price agreed -> transition to Availability_State.\n\nCRITICAL: Never ever mention a dollar amount before completing Step 3. Always check KB for customer handling guidance."
+                    "text": "You are the Sales Specialist. IMPORTANT: Do NOT mention any price until after Step 3. Check the Knowledge Base for pricing details and how to handle customer objections.\n\nSTEP 1 - IDENTIFY SERVICE:\nAsk what service they're interested in. Match to one of our 5 services (Chimney $249, Dryer Vent $149, Gutter $199, Power Washing $299, Air Duct $399/system). If they're unsure, briefly describe our services and help them choose. Do NOT say the price yet.\n\nSTEP 2 - GET ADDRESS:\nAsk: 'What's the address where you need the service?'\nOnce they give it, call the verify_address tool.\nAFTER the tool returns, read the formatted_address back: 'I have [formatted_address]. Is that correct?'\nWait for confirmation. If wrong, ask them to repeat.\n\nSTEP 3 - DISCOUNT CHECK (MUST happen BEFORE any price is mentioned):\nAsk: 'Before I give you the pricing, is anyone in your household military, a veteran, or a senior citizen?'\nIf yes: Note the 10% discount and mention it when quoting.\n\nSTEP 4 - QUOTE PRICE:\nNOW you can quote the price. If they qualified for military/veteran/senior discount, say: 'We offer a 10% discount for military, veterans, and seniors, so your price would be [discounted price].' Otherwise quote the regular price.\nAsk: 'Does that work for you?'\n\nSTEP 5 - HANDLE HESITATION (if they push back on price):\nSay: 'Let me check with my manager on that, one moment please.' Then IMMEDIATELY transition to Manager_Check. Do NOT say anything else. Do NOT offer the discount yourself. The Manager_Check will handle the pause and then the Manager_Approved state will present the discount.\n\nSTEP 6 - Price agreed -> transition to Availability_State.\n\nCRITICAL: Never ever mention a dollar amount before completing Step 3. Always check KB for customer handling guidance."
                 },
                 "model_choice": {
                     "type": "cascading",
@@ -104,6 +104,14 @@
                         "transition_condition": {
                             "type": "prompt",
                             "prompt": "User confirmed address AND agreed to price."
+                        }
+                    },
+                    {
+                        "destination_node_id": "node-manager-check",
+                        "id": "edge-manager-check-trigger",
+                        "transition_condition": {
+                            "type": "prompt",
+                            "prompt": "User pushed back on price or said it's too expensive. Agent said let me check with my manager. Transition to manager check now."
                         }
                     }
                 ],
@@ -431,6 +439,74 @@
                     "y": 500.0
                 },
                 "wait_for_result": true
+            },
+            {
+                "tool_id": "tool-manager-check",
+                "else_edge": {
+                    "destination_node_id": "node-manager-approved",
+                    "id": "node-manager-check-else-edge",
+                    "transition_condition": {
+                        "type": "prompt",
+                        "prompt": "Else"
+                    }
+                },
+                "name": "Manager_Check",
+                "edges": [
+                    {
+                        "destination_node_id": "node-manager-approved",
+                        "id": "edge-manager-check-done",
+                        "transition_condition": {
+                            "type": "prompt",
+                            "prompt": "Manager check completed."
+                        }
+                    }
+                ],
+                "id": "node-manager-check",
+                "type": "function",
+                "tool_type": "local",
+                "speak_during_execution": false,
+                "display_position": {
+                    "x": 770.0,
+                    "y": 800.0
+                },
+                "wait_for_result": true
+            },
+            {
+                "instruction": {
+                    "type": "prompt",
+                    "text": "The manager check just completed. The manager has approved an additional 10% discount.\n\nCalculate the new discounted price:\n- If the customer already had a veteran/military/senior discount (10% off), apply another 10% off the already-discounted price.\n- If no prior discount, apply 10% off the base price.\n\nPricing reference: Chimney $249, Dryer Vent $149, Gutter $199, Power Washing $299, Air Duct $399/system.\n\nSay: 'Great news! My manager approved an additional 10% discount. That brings your total to [calculated price]. How does that sound?'\n\nIf they accept -> transition to Availability_State.\nIf they still hesitate and it's Air Duct service -> say 'Hold on one more moment, let me see.' Then say: 'My manager authorized our absolute best price of $199 per system. That is our final offer.' If they accept -> transition to Availability_State.\nIf they refuse all offers -> say: 'I understand. If you change your mind, feel free to call us back anytime. Have a great day!' Then transition to End Call."
+                },
+                "model_choice": {
+                    "type": "cascading",
+                    "model": "gemini-3.0-flash",
+                    "high_priority": false
+                },
+                "name": "Manager_Approved",
+                "edges": [
+                    {
+                        "destination_node_id": "node-1770753551246",
+                        "id": "edge-manager-approved-to-availability",
+                        "transition_condition": {
+                            "type": "prompt",
+                            "prompt": "Customer accepted the discounted price."
+                        }
+                    },
+                    {
+                        "destination_node_id": "end-call-node-1770283118544",
+                        "id": "edge-manager-approved-to-end",
+                        "transition_condition": {
+                            "type": "prompt",
+                            "prompt": "Customer declined all offers."
+                        }
+                    }
+                ],
+                "id": "node-manager-approved",
+                "knowledge_base_ids": [],
+                "type": "conversation",
+                "display_position": {
+                    "x": 770.0,
+                    "y": 1000.0
+                }
             }
         ],
         "start_node_id": "start-node-1770283118544",
@@ -679,6 +755,28 @@
                     "current_time": "$.current_time",
                     "iso_date": "$.iso_date",
                     "day_of_week": "$.day_of_week"
+                },
+                "parameters": {
+                    "type": "object",
+                    "required": [],
+                    "properties": {}
+                }
+            },
+            {
+                "headers": {},
+                "parameter_type": "json",
+                "method": "POST",
+                "query_params": {},
+                "description": "Simulates checking with a manager about a discount. Takes 5 seconds to respond, creating a realistic pause on the call.",
+                "type": "custom",
+                "url": "http://3.231.241.26:8000/api/appointments/simulate-manager-check",
+                "tool_id": "tool-manager-check",
+                "args_at_root": true,
+                "timeout_ms": 10000,
+                "name": "simulate_manager_check",
+                "response_variables": {
+                    "approved": "$.approved",
+                    "discount_message": "$.message"
                 },
                 "parameters": {
                     "type": "object",

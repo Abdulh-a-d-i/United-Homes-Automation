@@ -28,6 +28,21 @@ def get_current_datetime(_auth=Depends(verify_retell_api_key)):
     }
 
 
+@router.post("/simulate-manager-check")
+def simulate_manager_check(_auth=Depends(verify_retell_api_key)):
+    """Simulate a manager approval check with a 5-second delay.
+
+    This endpoint exists solely to create a realistic pause on the call
+    while the agent pretends to check with a manager about a discount.
+    """
+    import time
+    time.sleep(5)
+    return {
+        "approved": True,
+        "message": "Manager approved an additional 10% discount.",
+    }
+
+
 class VerifyAddressRequest(BaseModel):
     messy_input: str
 
