@@ -749,15 +749,70 @@ def get_technician_by_user_id(user_id):
 
 
 def get_techs_with_skill(service_type):
+    """Find technicians with a matching skill. Uses fuzzy matching to handle
+    variations like 'chimney', 'chimney cleaning', 'Chimney Cleaning', etc."""
+    import logging
+
+    # Normalize service type to lowercase keyword
+    service_lower = service_type.lower().strip()
+
+    # Map common variations to canonical service keywords
+    service_keywords = {
+        "chimney": ["chimney"],
+        "chimney cleaning": ["chimney"],
+        "dryer_vent": ["dryer", "vent"],
+        "dryer vent": ["dryer", "vent"],
+        "dryer vent cleaning": ["dryer", "vent"],
+        "gutter": ["gutter"],
+        "gutter cleaning": ["gutter"],
+        "power_washing": ["power", "wash", "pressure"],
+        "power washing": ["power", "wash", "pressure"],
+        "pressure washing": ["power", "wash", "pressure"],
+        "air_duct": ["duct", "air"],
+        "air duct": ["duct", "air"],
+        "air duct cleaning": ["duct", "air"],
+        "duct cleaning": ["duct", "air"],
+    }
+
+    # Get the keywords to match against
+    match_keywords = service_keywords.get(service_lower, [service_lower.split()[0] if service_lower else service_lower])
+
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
+        # First try: exact JSONB match
         cur.execute("""
             SELECT * FROM technicians
             WHERE status = 'active'
             AND skills @> %s::jsonb
         """, (f'["{service_type}"]',))
-        return [dict(tech) for tech in cur.fetchall()]
+        results = [dict(tech) for tech in cur.fetchall()]
+
+        if results:
+            logging.info(f"[SKILL MATCH] Exact match for '{service_type}': found {len(results)} techs: {[t['name'] for t in results]}")
+            return results
+
+        # Second try: case-insensitive text search in skills array
+        keyword_conditions = " OR ".join(["skills::text ILIKE %s" for _ in match_keywords])
+        keyword_params = [f'%{kw}%' for kw in match_keywords]
+
+        cur.execute(f"""
+            SELECT * FROM technicians
+            WHERE status = 'active'
+            AND ({keyword_conditions})
+        """, keyword_params)
+        results = [dict(tech) for tech in cur.fetchall()]
+
+        if results:
+            logging.info(f"[SKILL MATCH] Fuzzy match for '{service_type}' (keywords: {match_keywords}): found {len(results)} techs: {[t['name'] for t in results]}")
+            return results
+
+        # Fallback: return ALL active techs (better to suggest someone than no one)
+        logging.warning(f"[SKILL MATCH] No skill match for '{service_type}'. Falling back to ALL active techs.")
+        cur.execute("SELECT * FROM technicians WHERE status = 'active'")
+        results = [dict(tech) for tech in cur.fetchall()]
+        logging.info(f"[SKILL MATCH] Fallback: returning {len(results)} active techs: {[t['name'] for t in results]}")
+        return results
     finally:
         cur.close()
         conn.close()

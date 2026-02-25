@@ -86,9 +86,14 @@ def verify_address(request: VerifyAddressRequest):
 @router.post("/find-technician-availability", response_model=FindTechnicianResponse)
 def find_technician_availability(request: FindTechnicianRequest):
     try:
+        logging.info(f"[AVAILABILITY] Request: service={request.service_type}, lat={request.confirmed_latitude}, lng={request.confirmed_longitude}, time={request.requested_datetime}")
+
         techs = get_techs_with_skill(request.service_type)
 
+        logging.info(f"[AVAILABILITY] Found {len(techs)} techs for '{request.service_type}': {[(t['id'], t['name'], t.get('skills')) for t in techs]}")
+
         if not techs:
+            logging.warning(f"[AVAILABILITY] No techs at all for '{request.service_type}'")
             return FindTechnicianResponse(
                 success=False,
                 available=False,
