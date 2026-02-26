@@ -108,8 +108,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="United Home Services API", lifespan=lifespan)
 
 # CORS: locked to actual frontend origins
-_frontend = os.getenv("FRONTEND_URL", "http://localhost:3000")
+_frontend = os.getenv("FRONTEND_URL", "https://aidash.unitedhomecarolina.com")
 _allowed_origins = [
+    "https://aidash.unitedhomecarolina.com",
     _frontend,
     "http://localhost:3000",
     "http://localhost:5173",
