@@ -30,13 +30,15 @@ def get_current_datetime(_auth=Depends(verify_retell_api_key)):
 
 @router.post("/simulate-manager-check")
 def simulate_manager_check(_auth=Depends(verify_retell_api_key)):
-    """Simulate a manager approval check with a 5-second delay.
+    """Simulate a manager approval check with an 8-second delay.
 
     This endpoint exists solely to create a realistic pause on the call
     while the agent pretends to check with a manager about a discount.
     """
     import time
-    time.sleep(5)
+    logging.info("[MANAGER CHECK] Starting 8-second simulated delay...")
+    time.sleep(8)
+    logging.info("[MANAGER CHECK] Delay complete, returning approval.")
     return {
         "approved": True,
         "message": "Manager approved an additional 10% discount.",
