@@ -91,12 +91,14 @@ async def create_user(
     try:
         home_latitude = None
         home_longitude = None
+        home_address = request.address  # fallback to raw input
         if request.address:
             from src.utils.radar import geocode_address
             geo_result = geocode_address(request.address)
             if geo_result:
                 home_latitude = geo_result["latitude"]
                 home_longitude = geo_result["longitude"]
+                home_address = geo_result.get("formatted_address", request.address)
 
         temp_password = _generate_temp_password()
         user = create_user_by_admin(
@@ -109,7 +111,8 @@ async def create_user(
                 "address": request.address,
                 "skills": request.skills,
                 "home_latitude": home_latitude,
-                "home_longitude": home_longitude
+                "home_longitude": home_longitude,
+                "home_address": home_address,
             },
             temp_password
         )

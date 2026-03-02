@@ -362,8 +362,8 @@ def create_user_by_admin(user_data, temp_password):
 
             cur.execute("""
                 INSERT INTO technicians
-                (user_id, name, email, phone, skills, home_latitude, home_longitude, max_radius_miles, status)
-                VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, 'active')
+                (user_id, name, email, phone, skills, home_latitude, home_longitude, home_address, max_radius_miles, status)
+                VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, 'active')
                 RETURNING id
             """, (
                 user["id"],
@@ -373,6 +373,7 @@ def create_user_by_admin(user_data, temp_password):
                 skills_json,
                 user_data.get("home_latitude"),
                 user_data.get("home_longitude"),
+                user_data.get("home_address"),
                 50  # default max radius miles
             ))
             tech_id = cur.fetchone()
