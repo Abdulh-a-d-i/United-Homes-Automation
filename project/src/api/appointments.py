@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from datetime import datetime, timedelta
 
 from src.utils.radar import geocode_address
-from src.utils.db import get_techs_with_skill, get_technician, insert_appointment, delete_route_cache, get_tech_appointments_for_day
+from src.utils.db import get_techs_with_appointments_for_day, get_technician, insert_appointment, delete_route_cache
 from src.utils.distance import calculate_distance, estimate_tech_location
 from src.utils.api_key_auth import verify_retell_api_key
 
@@ -101,24 +101,50 @@ class BookAppointmentResponse(BaseModel):
     message: str
 
 
-@router.post("/verify-address", response_model=VerifyAddressResponse)
+@router.post("/verify-address")
 def verify_address(request: VerifyAddressRequest, _auth=Depends(verify_retell_api_key)):
     try:
         result = geocode_address(request.messy_input)
         if not result:
-            raise HTTPException(status_code=400, detail="Could not verify this address. Please try a more specific address or zip code.")
+            logging.warning("[GEOCODE] No result for input: %s", request.messy_input)
+            return {
+                "verified": False,
+                "formatted_address": None,
+                "latitude": None,
+                "longitude": None,
+                "confidence": None,
+                "low_confidence": False,
+                "message": "I could not locate that address. Could you provide the street number, street name, and city or zip code?",
+            }
 
-        return VerifyAddressResponse(
-            formatted_address=result["formatted_address"],
-            latitude=result["latitude"],
-            longitude=result["longitude"],
-            confidence=result.get("confidence")
+        confidence = result.get("confidence", "")
+        low_confidence = confidence == "fallback"
+
+        logging.info(
+            "[GEOCODE] Resolved '%s' -> '%s' (confidence=%s)",
+            request.messy_input, result["formatted_address"], confidence,
         )
-    except HTTPException:
-        raise
+
+        return {
+            "verified": True,
+            "formatted_address": result["formatted_address"],
+            "latitude": result["latitude"],
+            "longitude": result["longitude"],
+            "confidence": confidence,
+            "low_confidence": low_confidence,
+            "message": None,
+        }
     except Exception as e:
-        logging.error(f"Verify address error: {e}")
-        raise HTTPException(status_code=500, detail="Address verification failed. Please try again.")
+        logging.error("[GEOCODE] Unexpected error: %s", e)
+        return {
+            "verified": False,
+            "formatted_address": None,
+            "latitude": None,
+            "longitude": None,
+            "confidence": None,
+            "low_confidence": False,
+            "message": "Address verification is temporarily unavailable. Please try again.",
+        }
 
 
 # -- Service durations in minutes --
@@ -166,8 +192,8 @@ def find_technician_availability(request: FindTechnicianRequest, _auth=Depends(v
             request.confirmed_longitude,
         )
 
-        # Step 1: Get techs with the right skill
-        techs = get_techs_with_skill(request.service_type)
+        # Single query: techs with the right skill + their appointments for the day
+        techs = get_techs_with_appointments_for_day(request.service_type, req_date)
         logging.info(
             "[AVAILABILITY] Found %d techs for '%s': %s",
             len(techs), request.service_type,
@@ -192,9 +218,8 @@ def find_technician_availability(request: FindTechnicianRequest, _auth=Depends(v
                 )
                 continue
 
-            # Step 2: Get this tech's existing appointments on the requested date
-            appointments = get_tech_appointments_for_day(tech["id"], req_date)
-            appointments.sort(key=lambda a: a["start_time"])
+            # Appointments already loaded from the combined query
+            appointments = sorted(tech["appointments"], key=lambda a: a["start_time"])
 
             # Step 3: Find the earliest available slot
             slot_start = datetime(req_date.year, req_date.month, req_date.day,

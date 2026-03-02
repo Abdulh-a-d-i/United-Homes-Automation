@@ -331,6 +331,9 @@ def create_user_by_admin(user_data, temp_password):
         cur.execute("SELECT id FROM users WHERE email = %s", (user_data["email"],))
         if cur.fetchone():
             raise ValueError("Email already registered")
+        cur.execute("SELECT id FROM users WHERE username = %s", (user_data["username"],))
+        if cur.fetchone():
+            raise ValueError("Username already taken")
         hashed = bcrypt.hashpw(
             temp_password.encode("utf-8"),
             bcrypt.gensalt()
@@ -930,6 +933,121 @@ def get_techs_with_skill(service_type):
         results = [dict(tech) for tech in cur.fetchall()]
         logging.info(f"[SKILL MATCH] Fallback: returning {len(results)} active techs: {[t['name'] for t in results]}")
         return results
+    finally:
+        cur.close()
+        conn.close()
+
+
+
+def get_techs_with_appointments_for_day(service_type, date):
+    service_lower = service_type.lower().strip()
+
+    service_keywords = {
+        "chimney": ["chimney"],
+        "chimney cleaning": ["chimney"],
+        "dryer_vent": ["dryer", "vent"],
+        "dryer vent": ["dryer", "vent"],
+        "dryer vent cleaning": ["dryer", "vent"],
+        "gutter": ["gutter"],
+        "gutter cleaning": ["gutter"],
+        "power_washing": ["power", "wash", "pressure"],
+        "power washing": ["power", "wash", "pressure"],
+        "pressure washing": ["power", "wash", "pressure"],
+        "air_duct": ["duct", "air"],
+        "air duct": ["duct", "air"],
+        "air duct cleaning": ["duct", "air"],
+        "duct cleaning": ["duct", "air"],
+    }
+
+    match_keywords = service_keywords.get(
+        service_lower,
+        [service_lower.split()[0] if service_lower else service_lower],
+    )
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        keyword_conditions = " OR ".join(
+            ["t.skills::text ILIKE %s" for _ in match_keywords]
+        )
+        keyword_params = [f"%{kw}%" for kw in match_keywords]
+
+        cur.execute(
+            f"""
+            SELECT
+                t.id, t.name, t.email, t.phone, t.skills,
+                t.home_address, t.home_latitude, t.home_longitude,
+                t.max_radius_miles, t.status,
+                t.calendar_provider, t.calendar_email, t.calendar_connected,
+                a.id          AS appt_id,
+                a.start_time  AS appt_start_time,
+                a.end_time    AS appt_end_time,
+                a.latitude    AS appt_latitude,
+                a.longitude   AS appt_longitude
+            FROM technicians t
+            LEFT JOIN appointments a
+                ON a.technician_id = t.id
+               AND DATE(a.start_time) = %s
+               AND a.status = 'scheduled'
+            WHERE t.status = 'active'
+              AND (
+                  t.skills @> %s::jsonb
+                  OR ({keyword_conditions})
+              )
+            ORDER BY t.id, a.start_time
+            """,
+            [date, f'["{service_type}"]'] + keyword_params,
+        )
+        rows = cur.fetchall()
+
+        if not rows:
+            logging.warning(
+                "[SKILL MATCH] No skill match for '%s'. Falling back to all active techs.",
+                service_type,
+            )
+            cur.execute(
+                """
+                SELECT
+                    t.id, t.name, t.email, t.phone, t.skills,
+                    t.home_address, t.home_latitude, t.home_longitude,
+                    t.max_radius_miles, t.status,
+                    t.calendar_provider, t.calendar_email, t.calendar_connected,
+                    a.id          AS appt_id,
+                    a.start_time  AS appt_start_time,
+                    a.end_time    AS appt_end_time,
+                    a.latitude    AS appt_latitude,
+                    a.longitude   AS appt_longitude
+                FROM technicians t
+                LEFT JOIN appointments a
+                    ON a.technician_id = t.id
+                   AND DATE(a.start_time) = %s
+                   AND a.status = 'scheduled'
+                WHERE t.status = 'active'
+                ORDER BY t.id, a.start_time
+                """,
+                (date,),
+            )
+            rows = cur.fetchall()
+
+        tech_map = {}
+        for row in rows:
+            row = dict(row)
+            tid = row["id"]
+            if tid not in tech_map:
+                tech_map[tid] = {k: v for k, v in row.items() if not k.startswith("appt_")}
+                tech_map[tid]["appointments"] = []
+            if row["appt_id"] is not None:
+                tech_map[tid]["appointments"].append({
+                    "start_time": row["appt_start_time"],
+                    "end_time": row["appt_end_time"],
+                    "latitude": row["appt_latitude"],
+                    "longitude": row["appt_longitude"],
+                })
+
+        logging.info(
+            "[SKILL MATCH] Single-query found %d techs for '%s'", len(tech_map), service_type
+        )
+        return list(tech_map.values())
     finally:
         cur.close()
         conn.close()
