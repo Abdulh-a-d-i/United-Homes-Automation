@@ -68,6 +68,10 @@ async def admin_list_appointments(
                     "latitude": float(a["latitude"]) if a.get("latitude") else None,
                     "longitude": float(a["longitude"]) if a.get("longitude") else None
                 },
+                "pricing": {
+                    "quoted_price": float(a["quoted_price"]) if a.get("quoted_price") else None,
+                    "discount_applied": a.get("discount_applied")
+                },
                 "notes": a.get("notes"),
                 "created_at": str(a.get("created_at", ""))
             }
@@ -268,6 +272,10 @@ async def get_appointment_detail(
                     "end_time": str(appt["end_time"]),
                     "duration_minutes": appt.get("duration_minutes"),
                     "status": appt["status"],
+                    "pricing": {
+                        "quoted_price": float(appt["quoted_price"]) if appt.get("quoted_price") else None,
+                        "discount_applied": appt.get("discount_applied")
+                    },
                     "notes": appt.get("notes"),
                     "created_at": str(appt.get("created_at", ""))
                 }

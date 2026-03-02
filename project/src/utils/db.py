@@ -72,6 +72,8 @@ def create_tables():
             start_time TIMESTAMP,
             end_time TIMESTAMP,
             duration_minutes INTEGER DEFAULT 60,
+            quoted_price DECIMAL(10, 2),
+            discount_applied VARCHAR(100),
             status VARCHAR(50) DEFAULT 'scheduled',
             notes TEXT,
             reminder_sent BOOLEAN DEFAULT FALSE,
@@ -150,7 +152,11 @@ def _ensure_schema_migration(cur):
             ("calendar_credentials", "JSONB"),
             ("calendar_connected", "BOOLEAN DEFAULT FALSE"),
             ("home_address", "VARCHAR(500)"),
-        ]
+        ],
+        "appointments": [
+            ("quoted_price", "DECIMAL(10, 2)"),
+            ("discount_applied", "VARCHAR(100)"),
+        ],
     }
     for table, columns in columns_to_add.items():
         for col_name, col_type in columns:
@@ -947,7 +953,8 @@ def get_tech_appointments_for_day(tech_id, date):
 def insert_appointment(calendar_event_id, technician_id, customer_name,
                        customer_phone, customer_email, service_type, address,
                        latitude, longitude, start_time, end_time,
-                       duration_minutes, status, notes=None):
+                       duration_minutes, status, quoted_price=None,
+                       discount_applied=None, notes=None):
     """Insert a new appointment into the MAIN appointments table."""
     conn = get_db_connection()
     cur = conn.cursor()
@@ -956,15 +963,17 @@ def insert_appointment(calendar_event_id, technician_id, customer_name,
             INSERT INTO appointments
             (calendar_event_id, technician_id, customer_name, customer_phone,
              customer_email, service_type, address, latitude, longitude,
-             start_time, end_time, duration_minutes, status, notes)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             start_time, end_time, duration_minutes, quoted_price,
+             discount_applied, status, notes)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (calendar_event_id, technician_id, customer_name, customer_phone,
               customer_email, service_type, address, latitude, longitude,
-              start_time, end_time, duration_minutes, status, notes))
+              start_time, end_time, duration_minutes, quoted_price,
+              discount_applied, status, notes))
         result = cur.fetchone()
         conn.commit()
-        logging.info(f"[DB] Inserted appointment id={result[0] if result else 'unknown'} into appointments table")
+        logging.info(f"[DB] Inserted appointment id={result[0] if result else 'unknown'} price={quoted_price} discount={discount_applied}")
         return result[0] if result else None
     except Exception as e:
         conn.rollback()

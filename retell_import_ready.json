@@ -267,7 +267,7 @@
             {
                 "instruction": {
                     "type": "prompt",
-                    "text": "You are completing the booking. You already have the verified address, agreed time slot (from time_slot), service type, and technician (from technician_id and technician_name) from the previous steps.\n\nCollect these details from the customer if you don't have them yet:\n1. Full name\n2. Phone number\n3. Email address (ask: 'And what's the best email to send the confirmation to?')\n\nAs soon as you have ALL THREE (name, phone, email), IMMEDIATELY call the book_appointment tool with:\n- customer_name, customer_phone, customer_email\n- technician_id (from check_technician_availability response)\n- service_type\n- address, latitude, longitude (from verify_address response)\n- start_time = the time_slot value from check_technician_availability\n- duration_minutes = 60 for chimney/dryer_vent/gutter, 90 for power_washing, 120 for air_duct\n\nDo NOT keep talking or asking more questions. Do NOT wait for the customer to say 'go ahead.' Call the tool right away.\n\nAfter the tool returns successfully, read back the FULL confirmation naturally:\n'Wonderful, you're all set! I've booked your [service_type] appointment at [address] on [date and time]. Your technician will be [technician name]. We'll send a confirmation to [email]. Is there anything else I can help you with?'\n\nIf the tool fails: Say: 'I've recorded all your details and our team will reach out shortly to confirm. I apologize for the inconvenience.'\n\nAfter confirmation, transition to End Call. Do NOT re-ask for address or time."
+                    "text": "You are completing the booking. You already have the verified address, agreed time slot (from time_slot), service type, and technician (from technician_id and technician_name) from the previous steps.\n\nCollect these details from the customer if you don't have them yet:\n1. Full name\n2. Phone number\n3. Email address (ask: 'And what's the best email to send the confirmation to?')\n\nAs soon as you have ALL THREE (name, phone, email), IMMEDIATELY call the book_appointment tool with:\n- customer_name, customer_phone, customer_email\n- technician_id (from check_technician_availability response)\n- service_type\n- address, latitude, longitude (from verify_address response)\n- start_time = the time_slot value from check_technician_availability\n- duration_minutes = 60 for chimney/dryer_vent/gutter, 90 for power_washing, 120 for air_duct\n- quoted_price = the FINAL price the customer agreed to pay (after any discounts). Base prices: Chimney $249, Dryer Vent $149, Gutter $199, Power Washing $299, Air Duct $399/system.\n- discount_applied = description of any discount given (e.g. 'veteran 10%', 'senior 10%', 'manager 10%', 'manager 10% + veteran 10%', or 'none' if no discount)\n\nDo NOT keep talking or asking more questions. Do NOT wait for the customer to say 'go ahead.' Call the tool right away.\n\nAfter the tool returns successfully, read back the FULL confirmation naturally:\n'Wonderful, you're all set! I've booked your [service_type] appointment at [address] on [date and time] for $[quoted_price]. Your technician will be [technician name]. We'll send a confirmation to [email]. Is there anything else I can help you with?'\n\nIf the tool fails: Say: 'I've recorded all your details and our team will reach out shortly to confirm. I apologize for the inconvenience.'\n\nAfter confirmation, transition to End Call. Do NOT re-ask for address or time."
                 },
                 "model_choice": {
                     "type": "cascading",
@@ -624,7 +624,8 @@
                         "latitude",
                         "longitude",
                         "start_time",
-                        "duration_minutes"
+                        "duration_minutes",
+                        "quoted_price"
                     ],
                     "properties": {
                         "customer_name": {
@@ -673,6 +674,14 @@
                         "duration_minutes": {
                             "type": "number",
                             "description": ""
+                        },
+                        "quoted_price": {
+                            "type": "number",
+                            "description": "The final price the customer agreed to, after any discounts."
+                        },
+                        "discount_applied": {
+                            "type": "string",
+                            "description": "Description of discount given, e.g. 'veteran 10%', 'senior 10%', 'manager 10%', or 'none'."
                         }
                     }
                 }

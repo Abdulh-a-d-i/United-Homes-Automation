@@ -89,6 +89,8 @@ class BookAppointmentRequest(BaseModel):
     longitude: float
     start_time: datetime
     duration_minutes: int
+    quoted_price: Optional[float] = None
+    discount_applied: Optional[str] = None
 
 
 class BookAppointmentResponse(BaseModel):
@@ -320,6 +322,7 @@ def find_technician_availability(request: FindTechnicianRequest, _auth=Depends(v
             available=False,
             message="Error checking availability. Please try again.",
         )
+
 @router.post("/book-appointment", response_model=BookAppointmentResponse)
 def book_appointment(request: BookAppointmentRequest, _auth=Depends(verify_retell_api_key)):
     logging.info(f"[BOOKING] Request: customer={request.customer_name}, phone={request.customer_phone}, tech_id={request.technician_id}, service={request.service_type}, time={request.start_time}, address={request.address}")
@@ -349,7 +352,9 @@ def book_appointment(request: BookAppointmentRequest, _auth=Depends(verify_retel
             start_time=request.start_time,
             end_time=end_time,
             duration_minutes=request.duration_minutes,
-            status="scheduled"
+            status="scheduled",
+            quoted_price=request.quoted_price,
+            discount_applied=request.discount_applied,
         )
 
         delete_route_cache(request.technician_id, request.start_time.date())
