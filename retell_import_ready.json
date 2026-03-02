@@ -222,7 +222,7 @@
             {
                 "instruction": {
                     "type": "prompt",
-                    "text": "FIRST: You MUST call the get_current_datetime tool to find out today's date. Do this BEFORE asking the customer about scheduling.\n\nAfter you get today's date from the tool, ask: 'What date and time work best for you?'\n\nWhen the customer says something like 'this Friday' or 'next Tuesday at 10 AM', calculate the EXACT date using the current_date returned by the tool. For example, if the tool returned 'Tuesday, February 25, 2026', then 'this Friday' means Friday, February 28, 2026.\n\nOnce you have a specific date and time, convert it to ISO 8601 format (e.g. '2026-02-28T10:00:00') and call the check_technician_availability tool with the service_type, the latitude and longitude from the verified address, and the requested_datetime.\n\nIF the tool returns available=true:\nSay: 'Great news! We have [technician name] available on [day, full date, and time]. Would you like me to book that for you?'\nIf they agree -> transition to Book_State.\n\nIF the tool returns available=false with alternative_slots:\nSay: 'Unfortunately that specific time isn't available, but I do have some other options.' Then read out the alternatives naturally. Ask which one works.\nCall the tool again with the chosen time.\n\nIF the tool returns no technicians or available=false with no alternatives:\nSay: 'I'm sorry, we don't currently have availability for that date. Would you like to try a different day?'\n\nNever confirm a booking without calling check_technician_availability first. Always say the full day name and date (like 'Friday, February 28th at 10 AM'). NEVER guess or make up a date."
+                    "text": "FIRST: You MUST call the get_current_datetime tool to find out today's date. Do this BEFORE asking the customer about scheduling.\n\nAfter you get today's date from the tool, ask: 'What day works best for you?'\n\nIMPORTANT: Only ask for the DAY, not a specific time. We will find the best available time automatically.\n\nWhen the customer says something like 'this Friday' or 'next Tuesday', calculate the EXACT date using the current_date and iso_date returned by the get_current_datetime tool. For example, if the tool returned iso_date '2026-02-25' (a Tuesday), then 'this Friday' means '2026-02-28'.\n\nOnce you have a specific date in YYYY-MM-DD format, call the check_technician_availability tool with the service_type, latitude and longitude from the verified address, and the requested_date.\n\nIF the tool returns available=true with a time_slot:\nConvert the time_slot to natural language and say: 'Great news! We have [technician_name] available on [day name, full date] at [time from time_slot]. Would you like me to book that?'\nIf they agree -> transition to Book_State.\n\nIF the tool returns available=false:\nSay: 'I'm sorry, we don't have availability for that day. Would you like to try a different day?'\n\nNever guess or make up a date. Always use the get_current_datetime tool first. Always present the full day name and date (like 'Friday, February 28th at 8:00 AM')."
                 },
                 "model_choice": {
                     "type": "cascading",
@@ -236,7 +236,7 @@
                         "id": "edge-1770753551247-vxiez83ws",
                         "transition_condition": {
                             "type": "prompt",
-                            "prompt": "User has agreed to a specific time slot."
+                            "prompt": "User has agreed to the offered time slot."
                         }
                     },
                     {
@@ -244,7 +244,7 @@
                         "id": "edge-1770900624414-c3t87fs1j",
                         "transition_condition": {
                             "type": "prompt",
-                            "prompt": "User gave a preferred time. Call check_technician_availability now."
+                            "prompt": "User gave a preferred day. Call check_technician_availability now."
                         }
                     },
                     {
@@ -267,7 +267,7 @@
             {
                 "instruction": {
                     "type": "prompt",
-                    "text": "You are completing the booking. You already have the verified address, agreed time slot, service type, and technician from the previous steps.\n\nCollect these details from the customer if you don't have them yet:\n1. Full name\n2. Phone number\n3. Email address (ask: 'And what's the best email to send the confirmation to?')\n\nAs soon as you have ALL THREE (name, phone, email), IMMEDIATELY transition to call the book_appointment tool. Do NOT keep talking or asking more questions. Do NOT wait for the customer to say 'go ahead.' Call the tool right away.\n\nAfter the tool returns successfully, read back the FULL confirmation naturally:\n'Wonderful, you're all set! I've booked your [service_type] appointment at [address] on [date and time]. Your technician will be [technician name]. We'll send a confirmation to [email]. Is there anything else I can help you with?'\n\nIf the tool fails: Say: 'I've recorded all your details and our team will reach out shortly to confirm. I apologize for the inconvenience.'\n\nAfter confirmation, transition to End Call. Do NOT re-ask for address or time."
+                    "text": "You are completing the booking. You already have the verified address, agreed time slot (from time_slot), service type, and technician (from technician_id and technician_name) from the previous steps.\n\nCollect these details from the customer if you don't have them yet:\n1. Full name\n2. Phone number\n3. Email address (ask: 'And what's the best email to send the confirmation to?')\n\nAs soon as you have ALL THREE (name, phone, email), IMMEDIATELY call the book_appointment tool with:\n- customer_name, customer_phone, customer_email\n- technician_id (from check_technician_availability response)\n- service_type\n- address, latitude, longitude (from verify_address response)\n- start_time = the time_slot value from check_technician_availability\n- duration_minutes = 60 for chimney/dryer_vent/gutter, 90 for power_washing, 120 for air_duct\n\nDo NOT keep talking or asking more questions. Do NOT wait for the customer to say 'go ahead.' Call the tool right away.\n\nAfter the tool returns successfully, read back the FULL confirmation naturally:\n'Wonderful, you're all set! I've booked your [service_type] appointment at [address] on [date and time]. Your technician will be [technician name]. We'll send a confirmation to [email]. Is there anything else I can help you with?'\n\nIf the tool fails: Say: 'I've recorded all your details and our team will reach out shortly to confirm. I apologize for the inconvenience.'\n\nAfter confirmation, transition to End Call. Do NOT re-ask for address or time."
                 },
                 "model_choice": {
                     "type": "cascading",
@@ -519,7 +519,7 @@
                 "query_params": {},
                 "description": "Verifies and geocodes a messy address into structured data.",
                 "type": "custom",
-                "url": "http://3.231.241.26:8000/api/appointments/verify-address",
+                "url": "https://aisystem.unitedhomecarolina.com/api/appointments/verify-address",
                 "tool_id": "tool-1770754076296",
                 "args_at_root": true,
                 "timeout_ms": 20000,
@@ -547,9 +547,9 @@
                 "parameter_type": "json",
                 "method": "POST",
                 "query_params": {},
-                "description": "Finds the nearest available technician for the requested service, location, and time.",
+                "description": "Finds the nearest available technician for the requested service, location, and date. Returns the auto-assigned time slot.",
                 "type": "custom",
-                "url": "http://3.231.241.26:8000/api/appointments/find-technician-availability",
+                "url": "https://aisystem.unitedhomecarolina.com/api/appointments/find-technician-availability",
                 "tool_id": "tool-1770754520685",
                 "args_at_root": true,
                 "timeout_ms": 20000,
@@ -559,7 +559,7 @@
                     "technician_name": "$.technician.name",
                     "time_slot": "$.time_slot",
                     "available": "$.available",
-                    "alternative_slots": "$.alternative_slots"
+                    "availability_message": "$.message"
                 },
                 "parameters": {
                     "type": "object",
@@ -567,7 +567,7 @@
                         "service_type",
                         "confirmed_latitude",
                         "confirmed_longitude",
-                        "requested_datetime"
+                        "requested_date"
                     ],
                     "properties": {
                         "service_type": {
@@ -589,9 +589,9 @@
                             "type": "number",
                             "description": "Longitude from verify_address response."
                         },
-                        "requested_datetime": {
+                        "requested_date": {
                             "type": "string",
-                            "description": "ISO 8601 datetime the customer wants."
+                            "description": "The date the customer wants, in YYYY-MM-DD format. Example: 2026-02-28"
                         }
                     }
                 }
@@ -603,7 +603,7 @@
                 "query_params": {},
                 "description": "Books the appointment with all collected data.",
                 "type": "custom",
-                "url": "http://3.231.241.26:8000/api/appointments/book-appointment",
+                "url": "https://aisystem.unitedhomecarolina.com/api/appointments/book-appointment",
                 "tool_id": "tool-1770642855470",
                 "args_at_root": true,
                 "timeout_ms": 20000,
@@ -684,7 +684,7 @@
                 "query_params": {},
                 "description": "Cancels the customer's upcoming appointment by their phone number.",
                 "type": "custom",
-                "url": "http://3.231.241.26:8000/api/appointments/cancel-appointment",
+                "url": "https://aisystem.unitedhomecarolina.com/api/appointments/cancel-appointment",
                 "tool_id": "tool-1770643690091",
                 "args_at_root": true,
                 "timeout_ms": 20000,
@@ -714,7 +714,7 @@
                 "query_params": {},
                 "description": "Books a free redo appointment using Order ID or phone number lookup.",
                 "type": "custom",
-                "url": "http://3.231.241.26:8000/api/appointments/book-redo-appointment",
+                "url": "https://aisystem.unitedhomecarolina.com/api/appointments/book-redo-appointment",
                 "tool_id": "tool-1771254788507",
                 "args_at_root": true,
                 "timeout_ms": 20000,
@@ -745,7 +745,7 @@
                 "query_params": {},
                 "description": "Returns the current date and time. Call this to know what today's date is before scheduling.",
                 "type": "custom",
-                "url": "http://3.231.241.26:8000/api/appointments/get-current-datetime",
+                "url": "https://aisystem.unitedhomecarolina.com/api/appointments/get-current-datetime",
                 "tool_id": "tool-get-current-datetime",
                 "args_at_root": true,
                 "timeout_ms": 5000,
@@ -769,7 +769,7 @@
                 "query_params": {},
                 "description": "Simulates checking with a manager about a discount. Takes 5 seconds to respond, creating a realistic pause on the call.",
                 "type": "custom",
-                "url": "http://3.231.241.26:8000/api/appointments/simulate-manager-check",
+                "url": "https://aisystem.unitedhomecarolina.com/api/appointments/simulate-manager-check",
                 "tool_id": "tool-manager-check",
                 "args_at_root": true,
                 "timeout_ms": 10000,

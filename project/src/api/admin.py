@@ -53,6 +53,7 @@ async def list_users(
                 "is_active": u.get("is_active", True),
                 "skills": skills,
                 "address": {
+                    "formatted_address": u.get("home_address"),
                     "latitude": float(u["home_latitude"]) if u.get("home_latitude") else None,
                     "longitude": float(u["home_longitude"]) if u.get("home_longitude") else None
                 },
@@ -178,6 +179,11 @@ async def get_user_detail(
                     "is_admin": user.get("is_admin", False),
                     "skills": skills,
                     "technician_id": user.get("technician_id"),
+                    "address": {
+                        "formatted_address": user.get("home_address"),
+                        "latitude": float(user["home_latitude"]) if user.get("home_latitude") else None,
+                        "longitude": float(user["home_longitude"]) if user.get("home_longitude") else None
+                    },
                     "calendar": {
                         "connected": user.get("calendar_connected", False),
                         "provider": user.get("calendar_provider"),

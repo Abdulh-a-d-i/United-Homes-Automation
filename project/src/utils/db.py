@@ -44,6 +44,7 @@ def create_tables():
             email VARCHAR(255),
             phone VARCHAR(50),
             skills JSONB,
+            home_address VARCHAR(500),
             home_latitude DECIMAL(10, 8),
             home_longitude DECIMAL(11, 8),
             max_radius_miles INTEGER DEFAULT 20,
@@ -148,6 +149,7 @@ def _ensure_schema_migration(cur):
             ("calendar_email", "VARCHAR(255)"),
             ("calendar_credentials", "JSONB"),
             ("calendar_connected", "BOOLEAN DEFAULT FALSE"),
+            ("home_address", "VARCHAR(500)"),
         ]
     }
     for table, columns in columns_to_add.items():
@@ -273,7 +275,7 @@ def get_all_users_paginated(page=1, page_size=20, search=None):
                        u.phone, u.is_admin, u.is_active, u.created_at,
                        t.id as technician_id, t.skills, t.calendar_connected,
                        t.calendar_provider, t.calendar_email,
-                       t.home_latitude, t.home_longitude, t.status as tech_status
+                       t.home_address, t.home_latitude, t.home_longitude, t.status as tech_status
                 FROM users u
                 LEFT JOIN technicians t ON t.user_id = u.id
                 WHERE u.username ILIKE %s OR u.email ILIKE %s
@@ -288,7 +290,7 @@ def get_all_users_paginated(page=1, page_size=20, search=None):
                        u.phone, u.is_admin, u.is_active, u.created_at,
                        t.id as technician_id, t.skills, t.calendar_connected,
                        t.calendar_provider, t.calendar_email,
-                       t.home_latitude, t.home_longitude, t.status as tech_status
+                       t.home_address, t.home_latitude, t.home_longitude, t.status as tech_status
                 FROM users u
                 LEFT JOIN technicians t ON t.user_id = u.id
                 ORDER BY u.created_at DESC
@@ -460,7 +462,8 @@ def get_user_detail_with_calendar(user_id):
             SELECT u.id, u.username, u.email, u.first_name, u.last_name,
                    u.phone, u.is_admin, u.created_at,
                    t.id as technician_id, t.skills, t.calendar_connected,
-                   t.calendar_provider, t.calendar_email
+                   t.calendar_provider, t.calendar_email,
+                   t.home_address, t.home_latitude, t.home_longitude
             FROM users u
             LEFT JOIN technicians t ON t.user_id = u.id
             WHERE u.id = %s
@@ -490,22 +493,59 @@ def update_user(user_id, updates):
                 normalized.extend(parts)
             tech_fields["skills"] = json.dumps(normalized)
 
+        # Handle address update: geocode and store in technicians table
+        if "address" in updates and updates["address"]:
+            tech_fields["home_address"] = updates["address"]
+            try:
+                from src.utils.radar import geocode_address
+                geo = geocode_address(updates["address"])
+                if geo and geo.get("latitude") and geo.get("longitude"):
+                    tech_fields["home_latitude"] = geo["latitude"]
+                    tech_fields["home_longitude"] = geo["longitude"]
+                    # Use the formatted address from geocoder if available
+                    if geo.get("formatted_address"):
+                        tech_fields["home_address"] = geo["formatted_address"]
+                    logging.info(
+                        "[USER UPDATE] Geocoded address for user %s: %s -> (%s, %s)",
+                        user_id, updates["address"],
+                        tech_fields["home_latitude"], tech_fields["home_longitude"],
+                    )
+                else:
+                    logging.warning(
+                        "[USER UPDATE] Geocoding failed for user %s address: %s",
+                        user_id, updates["address"],
+                    )
+            except Exception as e:
+                logging.error("[USER UPDATE] Geocode error for user %s: %s", user_id, e)
+
         if user_fields:
             set_clause = ", ".join(f"{k} = %s" for k in user_fields)
             values = list(user_fields.values()) + [user_id]
             cur.execute(f"UPDATE users SET {set_clause} WHERE id = %s", values)
 
-        # If skills were provided, upsert the technician row
+        # If tech fields were provided (skills or address), upsert the technician row
         if tech_fields:
             cur.execute("SELECT id FROM technicians WHERE user_id = %s", (user_id,))
             tech = cur.fetchone()
             if tech:
-                # Update existing tech row with skills
+                # Update existing tech row
+                set_clause = ", ".join(f"{k} = %s" for k in tech_fields)
+                values = list(tech_fields.values()) + [user_id]
+                # Handle jsonb casting for skills
+                set_parts = []
+                vals = []
+                for k, v in tech_fields.items():
+                    if k == "skills":
+                        set_parts.append(f"{k} = %s::jsonb")
+                    else:
+                        set_parts.append(f"{k} = %s")
+                    vals.append(v)
+                vals.append(user_id)
                 cur.execute(
-                    "UPDATE technicians SET skills = %s::jsonb WHERE user_id = %s",
-                    (tech_fields["skills"], user_id)
+                    f"UPDATE technicians SET {', '.join(set_parts)} WHERE user_id = %s",
+                    vals,
                 )
-                logging.info(f"[USER UPDATE] Updated tech skills for user {user_id}")
+                logging.info("[USER UPDATE] Updated tech fields for user %s: %s", user_id, list(tech_fields.keys()))
             else:
                 # No tech row exists - create one
                 cur.execute(
@@ -518,13 +558,18 @@ def update_user(user_id, updates):
                     name = name or user_row["username"]
                     cur.execute("""
                         INSERT INTO technicians
-                        (user_id, name, email, phone, skills, max_radius_miles, status)
-                        VALUES (%s, %s, %s, %s, %s::jsonb, %s, 'active')
+                        (user_id, name, email, phone, skills, home_address,
+                         home_latitude, home_longitude, max_radius_miles, status)
+                        VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, 'active')
                     """, (
                         user_id, name, user_row["email"], user_row.get("phone"),
-                        tech_fields["skills"], 50
+                        tech_fields.get("skills", "[]"),
+                        tech_fields.get("home_address"),
+                        tech_fields.get("home_latitude"),
+                        tech_fields.get("home_longitude"),
+                        50,
                     ))
-                    logging.info(f"[USER UPDATE] Created new tech row for user {user_id} with skills")
+                    logging.info("[USER UPDATE] Created new tech row for user %s", user_id)
 
         # Sync name/phone changes to technicians table
         if user_fields and any(k in user_fields for k in ["first_name", "last_name", "phone"]):

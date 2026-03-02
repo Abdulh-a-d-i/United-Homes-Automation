@@ -52,6 +52,10 @@ def estimate_tech_location(tech_id, target_datetime):
     if not tech:
         return None
 
+    # Guard against missing home coordinates
+    if not tech.get("home_latitude") or not tech.get("home_longitude"):
+        return None
+
     target_date = target_datetime.date()
     appointments = get_tech_appointments_for_day(tech_id, target_date)
 

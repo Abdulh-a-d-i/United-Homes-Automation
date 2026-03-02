@@ -2,13 +2,14 @@ import logging
 import uuid
 from typing import Optional
 from zoneinfo import ZoneInfo
+from datetime import date as date_type
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 
 from src.utils.radar import geocode_address
-from src.utils.db import get_techs_with_skill, get_technician, insert_appointment, delete_route_cache
+from src.utils.db import get_techs_with_skill, get_technician, insert_appointment, delete_route_cache, get_tech_appointments_for_day
 from src.utils.distance import calculate_distance, estimate_tech_location
 from src.utils.api_key_auth import verify_retell_api_key
 
@@ -60,7 +61,7 @@ class FindTechnicianRequest(BaseModel):
     service_type: str
     confirmed_latitude: float
     confirmed_longitude: float
-    requested_datetime: datetime
+    requested_date: str  # YYYY-MM-DD format
 
 
 class TechnicianInfo(BaseModel):
@@ -74,7 +75,7 @@ class FindTechnicianResponse(BaseModel):
     technician: TechnicianInfo = None
     available: bool
     time_slot: str = None
-    alternative_slots: list = None
+    message: str = None
 
 
 class BookAppointmentRequest(BaseModel):
@@ -118,121 +119,206 @@ def verify_address(request: VerifyAddressRequest, _auth=Depends(verify_retell_ap
         raise HTTPException(status_code=500, detail="Address verification failed. Please try again.")
 
 
+# -- Service durations in minutes --
+SERVICE_DURATIONS = {
+    "chimney": 60,
+    "dryer_vent": 60,
+    "gutter": 60,
+    "power_washing": 90,
+    "air_duct": 120,
+}
+
+# Business hours (Eastern Time)
+BUSINESS_START_HOUR = 8   # 8:00 AM
+BUSINESS_END_HOUR = 17    # 5:00 PM
+TRAVEL_BUFFER_MINUTES = 30
+
+
 @router.post("/find-technician-availability", response_model=FindTechnicianResponse)
 def find_technician_availability(request: FindTechnicianRequest, _auth=Depends(verify_retell_api_key)):
+    """Find the best available technician for a given date.
+
+    Algorithm:
+    1. Get all techs with the matching skill
+    2. For each tech, find the earliest available slot on the requested date
+    3. Calculate distance from the tech's last job site (or home if first job)
+    4. Return the closest available tech with the assigned time slot
+    """
     try:
-        logging.info(f"[AVAILABILITY] Request: service={request.service_type}, lat={request.confirmed_latitude}, lng={request.confirmed_longitude}, time={request.requested_datetime}")
-
-        techs = get_techs_with_skill(request.service_type)
-
-        logging.info(f"[AVAILABILITY] Found {len(techs)} techs for '{request.service_type}': {[(t['id'], t['name'], t.get('skills')) for t in techs]}")
-
-        if not techs:
-            logging.warning(f"[AVAILABILITY] No techs at all for '{request.service_type}'")
+        # Parse the requested date
+        try:
+            req_date = date_type.fromisoformat(request.requested_date)
+        except ValueError:
             return FindTechnicianResponse(
                 success=False,
                 available=False,
-                message="No technicians available for this service type"
+                message="Invalid date format. Please use YYYY-MM-DD.",
             )
 
-        tech_scores = []
+        eastern = ZoneInfo("America/New_York")
+        service_duration = SERVICE_DURATIONS.get(request.service_type, 60)
+
+        logging.info(
+            "[AVAILABILITY] Request: service=%s, date=%s, lat=%s, lng=%s",
+            request.service_type, req_date, request.confirmed_latitude,
+            request.confirmed_longitude,
+        )
+
+        # Step 1: Get techs with the right skill
+        techs = get_techs_with_skill(request.service_type)
+        logging.info(
+            "[AVAILABILITY] Found %d techs for '%s': %s",
+            len(techs), request.service_type,
+            [(t["id"], t["name"]) for t in techs],
+        )
+
+        if not techs:
+            return FindTechnicianResponse(
+                success=False,
+                available=False,
+                message="No technicians available for this service type.",
+            )
+
+        candidates = []
 
         for tech in techs:
             # Skip techs without home coordinates
             if not tech.get("home_latitude") or not tech.get("home_longitude"):
-                logging.warning(f"Tech {tech['name']} (id={tech['id']}) has no home coordinates, skipping")
+                logging.warning(
+                    "Tech %s (id=%d) has no home coordinates, skipping",
+                    tech["name"], tech["id"],
+                )
                 continue
 
-            estimated_location = estimate_tech_location(tech["id"], request.requested_datetime)
+            # Step 2: Get this tech's existing appointments on the requested date
+            appointments = get_tech_appointments_for_day(tech["id"], req_date)
+            appointments.sort(key=lambda a: a["start_time"])
 
-            if not estimated_location:
-                # Fallback to home location if estimate fails
-                estimated_location = {
-                    "latitude": float(tech["home_latitude"]),
-                    "longitude": float(tech["home_longitude"])
-                }
+            # Step 3: Find the earliest available slot
+            slot_start = datetime(req_date.year, req_date.month, req_date.day,
+                                  BUSINESS_START_HOUR, 0, tzinfo=eastern)
+            business_end = datetime(req_date.year, req_date.month, req_date.day,
+                                    BUSINESS_END_HOUR, 0, tzinfo=eastern)
+            slot_duration = timedelta(minutes=service_duration)
+            travel_buffer = timedelta(minutes=TRAVEL_BUFFER_MINUTES)
 
+            found_slot = None
+            depart_from_lat = float(tech["home_latitude"])
+            depart_from_lon = float(tech["home_longitude"])
+
+            if not appointments:
+                # No appointments -- first slot of the day from home
+                if slot_start + slot_duration <= business_end:
+                    found_slot = slot_start
+                    # Distance from home
+            else:
+                # Try to fit before the first appointment
+                first_appt_start = appointments[0]["start_time"]
+                if hasattr(first_appt_start, 'tzinfo') and first_appt_start.tzinfo is None:
+                    first_appt_start = first_appt_start.replace(tzinfo=eastern)
+
+                if slot_start + slot_duration + travel_buffer <= first_appt_start:
+                    found_slot = slot_start
+                    # Distance from home (departing at start of day)
+                else:
+                    # Try gaps between existing appointments
+                    for i, appt in enumerate(appointments):
+                        appt_end = appt["end_time"]
+                        if hasattr(appt_end, 'tzinfo') and appt_end.tzinfo is None:
+                            appt_end = appt_end.replace(tzinfo=eastern)
+
+                        candidate_start = appt_end + travel_buffer
+
+                        # Check if this slot fits before the next appointment
+                        if i + 1 < len(appointments):
+                            next_start = appointments[i + 1]["start_time"]
+                            if hasattr(next_start, 'tzinfo') and next_start.tzinfo is None:
+                                next_start = next_start.replace(tzinfo=eastern)
+                            if candidate_start + slot_duration + travel_buffer <= next_start:
+                                found_slot = candidate_start
+                                # Departing from this appointment's job site
+                                depart_from_lat = float(appt["latitude"])
+                                depart_from_lon = float(appt["longitude"])
+                                break
+                        else:
+                            # After last appointment
+                            if candidate_start + slot_duration <= business_end:
+                                found_slot = candidate_start
+                                depart_from_lat = float(appt["latitude"])
+                                depart_from_lon = float(appt["longitude"])
+                                break
+
+            if not found_slot:
+                logging.info(
+                    "[AVAILABILITY] Tech %s (id=%d) is FULL on %s",
+                    tech["name"], tech["id"], req_date,
+                )
+                continue
+
+            # Step 4: Calculate distance from departure point to customer
             distance = calculate_distance(
-                estimated_location["latitude"],
-                estimated_location["longitude"],
-                request.confirmed_latitude,
-                request.confirmed_longitude
+                depart_from_lat, depart_from_lon,
+                request.confirmed_latitude, request.confirmed_longitude,
             )
 
-            max_radius = tech.get("max_radius_miles") or 50  # Default 50mi if not set
+            max_radius = tech.get("max_radius_miles") or 50
 
-            if distance <= max_radius:
-                is_available = True
-
-                tech_scores.append({
-                    "tech": tech,
-                    "distance": distance,
-                    "available": is_available
-                })
-
-        tech_scores.sort(key=lambda x: (not x["available"], x["distance"]))
-
-        if not tech_scores:
-            # No techs in radius — log distances and tell the agent
-            logging.warning(f"[AVAILABILITY] No techs within radius for {request.service_type}. Distances:")
-            for tech in techs:
-                if not tech.get("home_latitude") or not tech.get("home_longitude"):
-                    logging.warning(f"  {tech['name']} (id={tech['id']}): NO COORDINATES")
-                    continue
-                dist = calculate_distance(
-                    float(tech["home_latitude"]), float(tech["home_longitude"]),
-                    request.confirmed_latitude, request.confirmed_longitude
-                )
-                max_r = tech.get("max_radius_miles") or 50
+            if distance > max_radius:
                 logging.warning(
-                    "  %s (id=%d): %.1f miles away, max_radius=%dmi -- TOO FAR",
-                    tech["name"], tech["id"], dist, max_r,
+                    "[AVAILABILITY] Tech %s (id=%d): %.1f mi from job site, max=%dmi -- TOO FAR",
+                    tech["name"], tech["id"], distance, max_radius,
                 )
+                continue
 
+            logging.info(
+                "[AVAILABILITY] Tech %s (id=%d): slot=%s, %.1f mi from departure point",
+                tech["name"], tech["id"], found_slot.strftime("%I:%M %p"), distance,
+            )
+
+            candidates.append({
+                "tech": tech,
+                "slot": found_slot,
+                "distance": distance,
+            })
+
+        if not candidates:
+            # Log all distances for debugging
+            logging.warning("[AVAILABILITY] No techs available for %s on %s", request.service_type, req_date)
             return FindTechnicianResponse(
                 success=False,
                 available=False,
-                message="No technicians available in your area. All our technicians are outside service range for this location."
+                message="No technicians available on this date. All technicians are either fully booked or outside service range.",
             )
 
-        best_tech = tech_scores[0]
+        # Step 5: Sort by earliest slot, then shortest distance
+        candidates.sort(key=lambda c: (c["slot"], c["distance"]))
+        best = candidates[0]
 
-        if best_tech["available"]:
-            return FindTechnicianResponse(
-                success=True,
-                technician=TechnicianInfo(
-                    id=best_tech["tech"]["id"],
-                    name=best_tech["tech"]["name"],
-                    distance_miles=round(best_tech["distance"], 2)
-                ),
-                available=True,
-                time_slot=request.requested_datetime.isoformat()
-            )
-        else:
-            alternative_slots = []
-            base_time = request.requested_datetime
-            for i in range(1, 4):
-                alt_time = base_time + timedelta(hours=i)
-                alternative_slots.append(alt_time.isoformat())
+        logging.info(
+            "[AVAILABILITY] BEST: %s at %s (%.1f mi)",
+            best["tech"]["name"],
+            best["slot"].strftime("%I:%M %p"),
+            best["distance"],
+        )
 
-            return FindTechnicianResponse(
-                success=True,
-                technician=TechnicianInfo(
-                    id=best_tech["tech"]["id"],
-                    name=best_tech["tech"]["name"],
-                    distance_miles=round(best_tech["distance"], 2)
-                ),
-                available=False,
-                alternative_slots=alternative_slots
-            )
-    except HTTPException:
-        raise
+        return FindTechnicianResponse(
+            success=True,
+            technician=TechnicianInfo(
+                id=best["tech"]["id"],
+                name=best["tech"]["name"],
+                distance_miles=round(best["distance"], 2),
+            ),
+            available=True,
+            time_slot=best["slot"].isoformat(),
+            message=f"{best['tech']['name']} available at {best['slot'].strftime('%I:%M %p')}",
+        )
+
     except Exception as e:
-        logging.error(f"Find technician availability error: {e}")
+        logging.error("[AVAILABILITY] Error: %s", e, exc_info=True)
         return FindTechnicianResponse(
             success=False,
             available=False,
-            message="Error checking availability. Please try again."
+            message="Error checking availability. Please try again.",
         )
 @router.post("/book-appointment", response_model=BookAppointmentResponse)
 def book_appointment(request: BookAppointmentRequest, _auth=Depends(verify_retell_api_key)):
