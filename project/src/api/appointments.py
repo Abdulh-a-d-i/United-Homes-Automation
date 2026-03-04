@@ -9,7 +9,13 @@ from pydantic import BaseModel
 from datetime import datetime, timedelta
 
 from src.utils.radar import geocode_address
-from src.utils.db import get_techs_with_appointments_for_day, get_technician, insert_appointment, delete_route_cache
+from src.utils.db import (
+    get_techs_with_appointments_for_day,
+    get_technician,
+    get_calendar_credentials,
+    insert_appointment,
+    delete_route_cache,
+)
 from src.utils.distance import calculate_distance, estimate_tech_location
 from src.utils.api_key_auth import verify_retell_api_key
 
@@ -44,6 +50,111 @@ def simulate_manager_check(_auth=Depends(verify_retell_api_key)):
         "approved": True,
         "message": "Manager approved an additional 10% discount.",
     }
+
+
+class VerifyZipRequest(BaseModel):
+    zip_code: str
+
+
+@router.post("/verify-zip")
+def verify_zip(request: VerifyZipRequest, _auth=Depends(verify_retell_api_key)):
+    import os
+    import requests as http_requests
+
+    api_key = os.getenv("RADAR_API_KEY", "")
+    zip_input = request.zip_code.strip()
+
+    CHARLOTTE_METRO_CITIES = {
+        # Mecklenburg County
+        "charlotte", "pineville", "matthews", "mint hill", "huntersville",
+        "cornelius", "davidson", "ballantyne", "steele creek", "university city",
+        # Cabarrus County
+        "concord", "kannapolis", "harrisburg", "locust", "albemarle",
+        # Union County
+        "monroe", "indian trail", "stallings", "waxhaw", "weddington",
+        "marvin", "wesley chapel", "wingate", "marshville",
+        # Gaston County
+        "gastonia", "belmont", "mount holly", "cramerton", "lowell",
+        "bessemer city", "kings mountain", "dallas", "stanley",
+        # Iredell County
+        "mooresville", "statesville", "troutman", "love valley",
+        # Lincoln County
+        "lincolnton",
+        # Rowan County
+        "salisbury", "rockwell", "china grove",
+        # Lake Norman / Denver area (Lincoln / Iredell)
+        "denver", "lake norman", "sherrills ford",
+        # York County SC
+        "rock hill", "fort mill", "tega cay", "lake wylie", "clover",
+        "york", "sharon",
+        # Nearby communities
+        "shelby", "mount holly", "cramerton",
+    }
+
+    # Secondary bounding box for edge cases where Radar returns an unusual
+    # community name that is still geographically inside the Charlotte metro
+    LAT_MIN, LAT_MAX = 34.75, 35.75
+    LNG_MIN, LNG_MAX = -81.65, -80.10
+
+    try:
+        resp = http_requests.get(
+            "https://api.radar.io/v1/geocode/forward",
+            headers={"Authorization": api_key},
+            params={"query": zip_input},
+            timeout=8,
+        )
+        data = resp.json()
+        addresses = data.get("addresses", [])
+
+        if not addresses:
+            logging.warning("[ZIP] No results for zip: %s", zip_input)
+            return {
+                "serviced": False,
+                "zip_code": zip_input,
+                "message": "We could not locate that zip code. Could you double-check the zip?",
+            }
+
+        addr = addresses[0]
+        city = addr.get("city", "")
+        state = addr.get("state", "")
+        country = addr.get("countryCode", "")
+        lat = addr.get("latitude", 0)
+        lng = addr.get("longitude", 0)
+
+        logging.info("[ZIP] %s -> %s, %s %s (%.4f, %.4f)", zip_input, city, state, country, lat, lng)
+
+        city_match = city.lower() in CHARLOTTE_METRO_CITIES
+        bbox_match = (
+            country == "US"
+            and LAT_MIN <= lat <= LAT_MAX
+            and LNG_MIN <= lng <= LNG_MAX
+        )
+        in_area = city_match or bbox_match
+
+
+        if in_area:
+            return {
+                "serviced": True,
+                "zip_code": zip_input,
+                "city": city,
+                "state": state,
+                "message": f"Great, we service the {city} area!",
+            }
+        else:
+            return {
+                "serviced": False,
+                "zip_code": zip_input,
+                "city": city,
+                "state": state,
+                "message": f"Unfortunately we don't currently service {city}, {state}. We cover the greater Charlotte, NC metro area.",
+            }
+    except Exception as e:
+        logging.error("[ZIP] Error: %s", e)
+        return {
+            "serviced": True,
+            "zip_code": zip_input,
+            "message": "Zip code check is unavailable right now. Let's continue with your service request.",
+        }
 
 
 class VerifyAddressRequest(BaseModel):
@@ -384,7 +495,122 @@ def book_appointment(request: BookAppointmentRequest, _auth=Depends(verify_retel
 
         delete_route_cache(request.technician_id, request.start_time.date())
 
+        # Push event to technician's connected Google or Outlook calendar (non-fatal)
+        try:
+            creds = get_calendar_credentials(request.technician_id)
+            if creds and creds.get("calendar_connected"):
+                provider = creds.get("calendar_provider")
+                creds_dict = creds.get("calendar_credentials", {})
+                service_label = request.service_type.replace("_", " ").title()
+                event_summary = f"{service_label} - {request.customer_name}"
+                event_description = (
+                    f"Customer: {request.customer_name}\n"
+                    f"Phone: {request.customer_phone}\n"
+                    f"Email: {request.customer_email or 'N/A'}\n"
+                    f"Service: {service_label}\n"
+                    f"Price: ${request.quoted_price}\n"
+                    f"Discount: {request.discount_applied or 'none'}\n"
+                    f"Appointment ID: {appointment_id}"
+                )
+                attendees = [request.customer_email] if request.customer_email else []
+                if provider == "google":
+                    from src.services.google_calendar import GoogleCalendarService
+                    from src.utils.db import save_calendar_credentials
+                    cal = GoogleCalendarService(creds_dict)
+                    cal.create_event(
+                        summary=event_summary,
+                        start_datetime=request.start_time,
+                        end_datetime=end_time,
+                        description=event_description,
+                        location=request.address,
+                        attendees=attendees,
+                    )
+                    save_calendar_credentials(
+                        request.technician_id, "google",
+                        creds.get("calendar_email", ""),
+                        cal.get_updated_credentials(),
+                    )
+                    logging.info("[BOOKING] Google Calendar event created for tech %d", request.technician_id)
+                elif provider == "outlook":
+                    from src.services.outlook_calendar import OutlookCalendarService
+                    from src.utils.db import save_calendar_credentials
+                    cal = OutlookCalendarService(creds_dict)
+                    cal.create_event(
+                        summary=event_summary,
+                        start_datetime=request.start_time,
+                        end_datetime=end_time,
+                        description=event_description,
+                        location=request.address,
+                        attendees=attendees,
+                    )
+                    save_calendar_credentials(
+                        request.technician_id, "outlook",
+                        creds.get("calendar_email", ""),
+                        cal.get_updated_credentials(),
+                    )
+                    logging.info("[BOOKING] Outlook Calendar event created for tech %d", request.technician_id)
+        except Exception as cal_err:
+            logging.warning("[BOOKING] Calendar push failed (non-fatal): %s", cal_err)
+
+        # Push to admin calendar (non-fatal) — shows ALL tech appointments on one calendar
+        try:
+            from src.utils.db import get_admin_calendar_credentials, save_admin_calendar_credentials
+            admin_creds = get_admin_calendar_credentials()
+            if admin_creds and admin_creds.get("connected"):
+                admin_provider = admin_creds.get("provider")
+                admin_creds_dict = admin_creds.get("credentials", {})
+                service_label = request.service_type.replace("_", " ").title()
+                admin_event_summary = f"[{tech['name']}] {service_label} - {request.customer_name}"
+                admin_event_description = (
+                    f"Technician: {tech['name']}\n"
+                    f"Customer: {request.customer_name}\n"
+                    f"Phone: {request.customer_phone}\n"
+                    f"Email: {request.customer_email or 'N/A'}\n"
+                    f"Service: {service_label}\n"
+                    f"Price: ${request.quoted_price}\n"
+                    f"Discount: {request.discount_applied or 'none'}\n"
+                    f"Appointment ID: {appointment_id}"
+                )
+                attendees = []
+                if admin_provider == "google":
+                    from src.services.google_calendar import GoogleCalendarService
+                    admin_cal = GoogleCalendarService(admin_creds_dict)
+                    admin_cal.create_event(
+                        summary=admin_event_summary,
+                        start_datetime=request.start_time,
+                        end_datetime=end_time,
+                        description=admin_event_description,
+                        location=request.address,
+                        attendees=attendees,
+                    )
+                    save_admin_calendar_credentials(
+                        "google",
+                        admin_creds.get("email", ""),
+                        admin_cal.get_updated_credentials(),
+                    )
+                    logging.info("[BOOKING] Admin Google Calendar event created")
+                elif admin_provider == "outlook":
+                    from src.services.outlook_calendar import OutlookCalendarService
+                    admin_cal = OutlookCalendarService(admin_creds_dict)
+                    admin_cal.create_event(
+                        summary=admin_event_summary,
+                        start_datetime=request.start_time,
+                        end_datetime=end_time,
+                        description=admin_event_description,
+                        location=request.address,
+                        attendees=attendees,
+                    )
+                    save_admin_calendar_credentials(
+                        "outlook",
+                        admin_creds.get("email", ""),
+                        admin_cal.get_updated_credentials(),
+                    )
+                    logging.info("[BOOKING] Admin Outlook Calendar event created")
+        except Exception as admin_cal_err:
+            logging.warning("[BOOKING] Admin calendar push failed (non-fatal): %s", admin_cal_err)
+
         logging.info(f"[BOOKING] SUCCESS: {request.customer_name} booked with {tech['name']} for {request.service_type} at {request.start_time}")
+
 
         return BookAppointmentResponse(
             success=True,

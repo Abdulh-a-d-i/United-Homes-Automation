@@ -1,37 +1,39 @@
 {
-    "agent_name": "United home service",
+    "agent_id": "",
     "channel": "voice",
-    "last_modification_timestamp": 1771321915274,
+    "last_modification_timestamp": 1772438210906,
+    "agent_name": "United home service",
     "response_engine": {
         "type": "conversation-flow",
-        "version": 0,
-        "conversation_flow_id": "conversation_flow_97128821c953"
+        "version": 1,
+        "conversation_flow_id": "conversation_flow_398df6e66f64"
     },
     "language": "en-US",
     "data_storage_setting": "everything",
     "opt_in_signed_url": false,
-    "version": 0,
+    "version": 1,
     "is_published": false,
+    "version_title": "fixed distance",
     "post_call_analysis_model": "gpt-4.1-mini",
     "pii_config": {
         "mode": "post_call",
         "categories": []
     },
-    "voice_id": "11labs-Andrew",
+    "voice_id": "cartesia-Brynne",
     "max_call_duration_ms": 3600000,
     "interruption_sensitivity": 0.9,
     "begin_message_delay_ms": 1000,
     "allow_user_dtmf": true,
     "user_dtmf_options": {},
     "conversationFlow": {
-        "conversation_flow_id": "conversation_flow_97128821c953",
-        "version": 0,
-        "global_prompt": "You are Alex, a friendly and professional AI receptionist for United Home Services in Metro Charlotte, NC.\n\nTODAY'S DATE: {{current_date}}\nIMPORTANT: Use this date as the source of truth. When the customer says 'this Friday' or 'next week', calculate the ACTUAL date relative to today's date above. NEVER guess or hallucinate a date. If you are unsure of the exact date, say 'Let me check' and calculate from today's date.\n\nSERVICES & PRICING (check KB for details):\n- Chimney Cleaning: $249\n- Dryer Vent Cleaning: $149\n- Gutter Cleaning: $199\n- Power Washing: $299\n- Air Duct Cleaning: $399 per system\n\nCRITICAL RULES:\n1. NEVER GET STUCK. If any tool call fails, retry it once. If it fails a second time, say 'I'm having a little trouble with that on my end. Let me connect you with a team member who can help.' and immediately transfer.\n2. NEVER ask the same question more than twice in a row. If the customer cannot provide the needed information after two attempts, move forward with what you have or offer to transfer.\n3. For ANY service question, pricing, or complaint scenario, ALWAYS check the Knowledge Base FIRST.\n4. ALWAYS read back the verified address to the caller and ask them to confirm it.\n5. ALWAYS ask: 'Is anyone in the household military, veteran, or a senior citizen?' BEFORE quoting the price. If yes, apply 10% discount automatically.\n6. Never admit fault. Never discuss refunds. Never promise a specific refund amount.\n7. If user is angry, frustrated, or asks for a manager/human, transfer immediately using transfer_call.\n8. Be conversational, warm, and human-like. Avoid robotic lists. Use natural transitions.\n9. When quoting times, say the day and time naturally like 'Tuesday at 10 AM' not ISO format.\n10. NEVER make up a date. Always calculate from TODAY'S DATE above.",
+        "conversation_flow_id": "conversation_flow_398df6e66f64",
+        "version": 1,
+        "global_prompt": "You are Alex, a friendly and professional AI receptionist for United Home Services in Metro Charlotte, NC.\n\nTODAY'S DATE: {{current_date}}\nIMPORTANT: Use this date as the source of truth. When the customer says 'this Friday' or 'next week', calculate the ACTUAL date relative to today's date above. NEVER guess or hallucinate a date. If you are unsure of the exact date, say 'Let me check' and calculate from today's date.\n\nSERVICES & PRICING (check KB for details):\n- Chimney Cleaning: $249\n- Dryer Vent Cleaning: $149\n- Gutter Cleaning: $199\n- Power Washing: $299\n- Air Duct Cleaning: $399 per system\n\nCRITICAL RULES:\n1. Retry failed tool calls up to 2 times before telling the customer there's an issue.\n2. For ANY service question, pricing, or complaint scenario, ALWAYS check the Knowledge Base FIRST.\n3. ALWAYS read back the verified address to the caller and ask them to confirm it.\n4. ALWAYS ask: 'Is anyone in the household military, veteran, or a senior citizen?' BEFORE quoting the price. If yes, apply 10% discount automatically.\n5. Never admit fault. Never discuss refunds. Never promise a specific refund amount.\n6. If user is angry, frustrated, or asks for a manager/human, transfer immediately using transfer_call.\n7. Be conversational, warm, and human-like. Avoid robotic lists. Use natural transitions.\n8. When quoting times, say the day and time naturally like 'Tuesday at 10 AM' not ISO format.\n9. NEVER make up a date. Always calculate from TODAY'S DATE above.",
         "nodes": [
             {
                 "instruction": {
                     "type": "prompt",
-                    "text": "Greet the caller warmly: 'Thank you for calling United Home Services, this is Alex! How can I help you today?'\n\nListen carefully to classify their intent:\n- If they mention booking, scheduling, pricing, quotes, new service, or any service name -> transition to Sales_State\n- If they mention a past job, complaint, issue, problem, redo, cancel, or dissatisfaction -> transition to Support_State\n- If unclear, ask once: 'Are you looking to book a new service, or are you calling about a previous appointment?'\n- If still unclear after one follow-up question, default to Sales_State immediately - do not ask again.\n\nFor general service questions, check the Knowledge Base first and answer directly."
+                    "text": "Greet the caller warmly: 'Thank you for calling United Home Services, this is Alex! How can I help you today?'\n\nListen for their intent:\n- Whatever the reason for the call, first ask: 'Could I get your zip code so I can confirm we service your area?'\n- Transition to Zip_Check immediately once you have the zip code.\n- If still unclear after one follow-up, ask for the zip code and proceed."
                 },
                 "model_choice": {
                     "type": "cascading",
@@ -41,19 +43,11 @@
                 "name": "Root_State",
                 "edges": [
                     {
-                        "destination_node_id": "node-1770285939818",
-                        "id": "edge-1",
+                        "destination_node_id": "node-zip-check",
+                        "id": "edge-root-to-zip",
                         "transition_condition": {
                             "type": "prompt",
-                            "prompt": "User wants a new service or booking."
-                        }
-                    },
-                    {
-                        "destination_node_id": "node-1770286012250",
-                        "id": "edge-2",
-                        "transition_condition": {
-                            "type": "prompt",
-                            "prompt": "User has an existing issue or complaint."
+                            "prompt": "Customer provided a zip code. Call verify_zip now."
                         }
                     }
                 ],
@@ -66,12 +60,87 @@
                 }
             },
             {
+                "tool_id": "tool-verify-zip",
+                "else_edge": {
+                    "destination_node_id": "start-node-1770283118544",
+                    "id": "node-zip-check-else-edge",
+                    "transition_condition": {
+                        "type": "prompt",
+                        "prompt": "Else"
+                    }
+                },
+                "name": "Zip_Check",
+                "edges": [
+                    {
+                        "destination_node_id": "node-zip-result",
+                        "id": "edge-zip-check-done",
+                        "transition_condition": {
+                            "type": "prompt",
+                            "prompt": "verify_zip tool completed."
+                        }
+                    }
+                ],
+                "id": "node-zip-check",
+                "type": "function",
+                "tool_type": "local",
+                "speak_during_execution": true,
+                "display_position": {
+                    "x": 550.0,
+                    "y": 425.0
+                },
+                "wait_for_result": true
+            },
+            {
+                "instruction": {
+                    "type": "prompt",
+                    "text": "The verify_zip tool just returned. Check the 'serviced' field:\n\n- If serviced=true: Say the message from the tool (e.g. 'Great, we service the [city] area!'). Then ask: 'How can I help you today? Are you looking to book a new service or calling about a previous appointment?' Transition to Sales_State or Support_State based on their answer.\n- If serviced=false: Say the message from the tool (e.g. 'Unfortunately we don't currently service [city]...'). Then say: 'We cover the greater Charlotte, NC metro area. If you believe this is a mistake, please feel free to call us back.' Then transition to End Call."
+                },
+                "model_choice": {
+                    "type": "cascading",
+                    "model": "gemini-3.0-flash",
+                    "high_priority": false
+                },
+                "name": "Zip_Result",
+                "edges": [
+                    {
+                        "destination_node_id": "node-1770285939818",
+                        "id": "edge-zip-to-sales",
+                        "transition_condition": {
+                            "type": "prompt",
+                            "prompt": "Area is serviced and customer wants to book a new service."
+                        }
+                    },
+                    {
+                        "destination_node_id": "node-1770286012250",
+                        "id": "edge-zip-to-support",
+                        "transition_condition": {
+                            "type": "prompt",
+                            "prompt": "Area is serviced and customer is calling about a previous appointment or complaint."
+                        }
+                    },
+                    {
+                        "destination_node_id": "end-call-node-1770283118544",
+                        "id": "edge-zip-out-of-area",
+                        "transition_condition": {
+                            "type": "prompt",
+                            "prompt": "Area is NOT serviced. End the call politely."
+                        }
+                    }
+                ],
+                "id": "node-zip-result",
+                "type": "conversation",
+                "display_position": {
+                    "x": 800.0,
+                    "y": 425.0
+                }
+            },
+            {
                 "name": "End Call",
                 "id": "end-call-node-1770283118544",
                 "type": "end",
                 "display_position": {
-                    "x": 2250.0727524899885,
-                    "y": 1371.2266821867518
+                    "x": 2455.3039759013955,
+                    "y": 957.5797542399886
                 },
                 "instruction": {
                     "type": "prompt",
@@ -81,7 +150,7 @@
             {
                 "instruction": {
                     "type": "prompt",
-                    "text": "You are the Sales Specialist. IMPORTANT: Do NOT mention any price until after Step 3. Check the Knowledge Base for pricing details and how to handle customer objections.\n\nSTEP 1 - IDENTIFY SERVICE:\nAsk what service they're interested in. Match to one of our 5 services (Chimney $249, Dryer Vent $149, Gutter $199, Power Washing $299, Air Duct $399/system). If they're unsure, briefly describe our services and help them choose. Do NOT say the price yet.\n\nSTEP 2 - GET ADDRESS:\nAsk: 'What's the address where you need the service?'\nOnce they give it, call the verify_address tool.\nAFTER the tool returns, CHECK the 'verified' field:\n- If verified=true AND low_confidence=false: read back formatted_address and ask 'Is that correct?'\n- If verified=true AND low_confidence=true: say 'I found [formatted_address], but I want to make sure that's right. Can you confirm your address?'\n- If verified=false: read the message field aloud, then ask the customer to repeat their address more clearly with a street number, street name, and city or zip code. Then call verify_address again.\n- If verified=false a second time in a row: say 'I'm having a bit of trouble looking that up on my end. Let me connect you with someone who can assist you directly.' Then transfer immediately. Do NOT try a third time.\nWait for confirmation before moving forward. Never proceed with a lat/longitude of null.\n\nSTEP 3 - DISCOUNT CHECK (MUST happen BEFORE any price is mentioned):\nAsk: 'Before I give you the pricing, is anyone in your household military, a veteran, or a senior citizen?'\nIf yes: Note the 10% discount and mention it when quoting.\n\nSTEP 4 - QUOTE PRICE:\nNOW you can quote the price. If they qualified for military/veteran/senior discount, say: 'We offer a 10% discount for military, veterans, and seniors, so your price would be [discounted price].' Otherwise quote the regular price.\nAsk: 'Does that work for you?'\n\nSTEP 5 - HANDLE HESITATION (if they push back on price):\nSay: 'Let me check with my manager on that, one moment please.' Then IMMEDIATELY transition to Manager_Check. Do NOT say anything else.\n\nSTEP 6 - Price agreed -> transition to Availability_State.\n\nCRITICAL: Never ever mention a dollar amount before completing Step 3. Always check KB for customer handling guidance."
+                    "text": "You are the Sales Specialist. IMPORTANT: Do NOT mention any price until after Step 3. Check the Knowledge Base for pricing details and how to handle customer objections.\n\nSTEP 1 - IDENTIFY SERVICE:\nAsk what service they're interested in. Match to one of our 5 services (Chimney $249, Dryer Vent $149, Gutter $199, Power Washing $299, Air Duct $399/system). If they're unsure, briefly describe our services and help them choose. Do NOT say the price yet.\n\nSTEP 2 - GET ADDRESS:\nAsk: 'What's the address where you need the service?'\nOnce they give it, call the verify_address tool.\nAFTER the tool returns, read the formatted_address back: 'I have [formatted_address]. Is that correct?'\nWait for confirmation. If wrong, ask them to repeat.\n\nSTEP 3 - DISCOUNT CHECK (MUST happen BEFORE any price is mentioned):\nAsk: 'Before I give you the pricing, is anyone in your household military, a veteran, or a senior citizen?'\nIf yes: Note the 10% discount and mention it when quoting.\n\nSTEP 4 - QUOTE PRICE:\nNOW you can quote the price. If they qualified for military/veteran/senior discount, say: 'We offer a 10% discount for military, veterans, and seniors, so your price would be [discounted price].' Otherwise quote the regular price.\nAsk: 'Does that work for you?'\n\nSTEP 5 - HANDLE HESITATION (if they push back on price):\nSay: 'Let me check with my manager on that, one moment please.' Then IMMEDIATELY transition to Manager_Check. Do NOT say anything else. Do NOT offer the discount yourself. The Manager_Check will handle the pause and then the Manager_Approved state will present the discount.\n\nSTEP 6 - Price agreed -> transition to Availability_State.\n\nCRITICAL: Never ever mention a dollar amount before completing Step 3. Always check KB for customer handling guidance."
                 },
                 "model_choice": {
                     "type": "cascading",
@@ -119,8 +188,8 @@
                 "knowledge_base_ids": [],
                 "type": "conversation",
                 "display_position": {
-                    "x": 770.818591997161,
-                    "y": 32.476295911579996
+                    "x": 831.7571314278897,
+                    "y": 15.06528464565747
                 }
             },
             {
@@ -128,12 +197,12 @@
                     "type": "prompt",
                     "text": "You are the Support Specialist. ALWAYS identify the specific service first (duct cleaning, dryer vent, chimney, power washing, or gutter).\n\nThen check the Knowledge Base for the EXACT complaint scenario. The KB has 3 tiers:\n\nTIER 1 - EXPLAIN (no visit needed): Cosmetic, environmental, or expectation issues. Empathize and explain using the EXACT response from KB. Never admit fault. Examples: 'stains still visible', 'algae came back', 'service was too quick'.\n\nTIER 2 - FREE REDO: Missed work, incomplete cleaning, workmanship failures listed in KB. Say: 'I apologize for that experience. Let me get you scheduled for a return visit at no charge.' Then transition to Redo_Booking_State.\n\nTIER 3 - ESCALATE TO HUMAN: ANY mention of damage, safety, refund, chargeback, lawyer, BBB, insurance, or if the customer is upset/angry. Say: 'I completely understand your concern. Let me connect you with a team member who can help resolve this right away.' Then transfer immediately.\n\nFor tech behavior complaints (late, rushed, rude, unprofessional, no shoe covers, poor communication): Apologize sincerely and ask: 'I'm sorry about that. Would you like me to connect you with a team member to discuss this further?'\n\nALWAYS check KB before responding. Never guess."
                 },
-                "name": "Support_State",
                 "model_choice": {
                     "type": "cascading",
                     "model": "gemini-3.0-flash",
                     "high_priority": false
                 },
+                "name": "Support_State",
                 "edges": [
                     {
                         "destination_node_id": "node-1770286048737",
@@ -193,8 +262,8 @@
                 "type": "transfer_call",
                 "speak_during_execution": false,
                 "display_position": {
-                    "x": 1465.2988354256013,
-                    "y": 1454.2099933871743
+                    "x": 2006.4361937055758,
+                    "y": 1280.436327131597
                 }
             },
             {
@@ -214,15 +283,15 @@
                 "tool_type": "local",
                 "speak_during_execution": true,
                 "display_position": {
-                    "x": 1800.8683359281813,
-                    "y": 1452.6433169419415
+                    "x": 2011.8983826791123,
+                    "y": 1457.4985564338765
                 },
                 "wait_for_result": true
             },
             {
                 "instruction": {
                     "type": "prompt",
-                    "text": "FIRST: You MUST call the get_current_datetime tool to find out today's date. Do this BEFORE asking the customer about scheduling. If that tool fails, ask the customer: 'Could you tell me today's date so I can check our schedule?' and use their answer.\n\nAfter you have today's date, ask: 'What day works best for you?'\n\nIMPORTANT: Only ask for the DAY, not a specific time. We automatically find the best available slot.\n\nWhen the customer gives a day like 'this Friday' or 'next Tuesday', calculate the exact date from the iso_date returned by the tool.\n\nOnce you have a specific date in YYYY-MM-DD format, call the check_technician_availability tool with service_type, latitude, longitude (from verify_address), and requested_date.\n\nIF available=true: Convert time_slot to natural language and say: 'Great news! We have [technician_name] available on [day name, full date] at [time]. Would you like me to book that?' If they agree -> transition to Book_State.\n\nIF available=false: Say: 'I'm sorry, we don't have any openings on that day. Would you like to try a different day?' Let them suggest another date and call the tool again.\n\nIF available=false for 2 or more different dates in a row: Say: 'It looks like we have a very busy schedule right now. Let me connect you with our scheduling team who can find the best time for you.' Then transfer immediately. Do NOT keep asking for more dates."
+                    "text": "FIRST: You MUST call the get_current_datetime tool to find out today's date. Do this BEFORE asking the customer about scheduling.\n\nAfter you get today's date from the tool, ask: 'What day works best for you?'\n\nIMPORTANT: Only ask for the DAY, not a specific time. We will find the best available time automatically.\n\nWhen the customer says something like 'this Friday' or 'next Tuesday', calculate the EXACT date using the current_date and iso_date returned by the get_current_datetime tool. For example, if the tool returned iso_date '2026-02-25' (a Tuesday), then 'this Friday' means '2026-02-28'.\n\nOnce you have a specific date in YYYY-MM-DD format, call the check_technician_availability tool with the service_type, latitude and longitude from the verified address, and the requested_date.\n\nIF the tool returns available=true with a time_slot:\nConvert the time_slot to natural language and say: 'Great news! We have [technician_name] available on [day name, full date] at [time from time_slot]. Would you like me to book that?'\nIf they agree -> transition to Book_State.\n\nIF the tool returns available=false:\nSay: 'I'm sorry, we don't have availability for that day. Would you like to try a different day?'\n\nNever guess or make up a date. Always use the get_current_datetime tool first. Always present the full day name and date (like 'Friday, February 28th at 8:00 AM')."
                 },
                 "model_choice": {
                     "type": "cascading",
@@ -260,14 +329,14 @@
                 "knowledge_base_ids": [],
                 "type": "conversation",
                 "display_position": {
-                    "x": 1243.3176660721394,
-                    "y": 192.21676355663158
+                    "x": 1394.2254606111835,
+                    "y": 38.01337415333367
                 }
             },
             {
                 "instruction": {
                     "type": "prompt",
-                    "text": "You are completing the booking. You already have the verified address, time slot, service type, and technician from the previous steps.\n\nCollect these details from the customer if you don't have them yet:\n1. Full name\n2. Phone number\n3. Email address (ask: 'And what's the best email to send the confirmation to?')\n\nDo NOT ask more than once for any of these. If the customer cannot provide email, use an empty string and proceed anyway.\n\nAs soon as you have name and phone (email optional), IMMEDIATELY call the book_appointment tool with:\n- customer_name, customer_phone, customer_email\n- technician_id (from check_technician_availability response)\n- service_type\n- address, latitude, longitude (from verify_address response)\n- start_time = the time_slot value from check_technician_availability\n- duration_minutes = 60 for chimney/dryer_vent/gutter, 90 for power_washing, 120 for air_duct\n- quoted_price = the FINAL price the customer agreed to pay\n- discount_applied = e.g. 'veteran 10%', 'senior 10%', 'manager 10%', or 'none'\n\nCall the tool right away. Do NOT wait for the customer to say 'go ahead.'\n\nIF the tool succeeds: Say: 'Wonderful, you're all set! I've booked your [service_type] appointment at [address] on [date and time] for $[quoted_price]. Your technician will be [technician name]. We'll send a confirmation to [email]. Is there anything else I can help you with?' Then transition to End Call.\n\nIF the tool fails: Say: 'I have all your details noted and our team will reach out shortly to confirm your appointment. I apologize for any inconvenience.' Then transition to End Call immediately. Do NOT retry the booking tool."
+                    "text": "You are completing the booking. You already have the verified address, agreed time slot (from time_slot), service type, and technician (from technician_id and technician_name) from the previous steps.\n\nCollect these details from the customer if you don't have them yet:\n1. Full name\n2. Phone number\n3. Email address (ask: 'And what's the best email to send the confirmation to?')\n\nAs soon as you have ALL THREE (name, phone, email), IMMEDIATELY call the book_appointment tool with:\n- customer_name, customer_phone, customer_email\n- technician_id (from check_technician_availability response)\n- service_type\n- address, latitude, longitude (from verify_address response)\n- start_time = the time_slot value from check_technician_availability\n- duration_minutes = 60 for chimney/dryer_vent/gutter, 90 for power_washing, 120 for air_duct\n\nDo NOT keep talking or asking more questions. Do NOT wait for the customer to say 'go ahead.' Call the tool right away.\n\nAfter the tool returns successfully, read back the FULL confirmation naturally:\n'Wonderful, you're all set! I've booked your [service_type] appointment at [address] on [date and time]. Your technician will be [technician name]. We'll send a confirmation to [email]. Is there anything else I can help you with?'\n\nIf the tool fails: Say: 'I've recorded all your details and our team will reach out shortly to confirm. I apologize for the inconvenience.'\n\nAfter confirmation, transition to End Call. Do NOT re-ask for address or time."
                 },
                 "model_choice": {
                     "type": "cascading",
@@ -297,8 +366,8 @@
                 "knowledge_base_ids": [],
                 "type": "conversation",
                 "display_position": {
-                    "x": 1794.4761034033354,
-                    "y": 184.48594683825894
+                    "x": 1916.2117508854342,
+                    "y": 190.1532833850089
                 }
             },
             {
@@ -318,8 +387,8 @@
                 "tool_type": "local",
                 "speak_during_execution": true,
                 "display_position": {
-                    "x": 774.9770950267863,
-                    "y": 631.4298604577001
+                    "x": 772.037626042235,
+                    "y": 679.9310987027949
                 },
                 "wait_for_result": true
             },
@@ -340,15 +409,15 @@
                 "tool_type": "local",
                 "speak_during_execution": true,
                 "display_position": {
-                    "x": 1245.0901376559452,
-                    "y": 737.8524391137191
+                    "x": 1403.0300600131816,
+                    "y": 846.9027044458701
                 },
                 "wait_for_result": true
             },
             {
                 "tool_id": "tool-1770642855470",
                 "else_edge": {
-                    "destination_node_id": "end-call-node-1770283118544",
+                    "destination_node_id": "node-1770753674935",
                     "id": "node-1770755792494-else-edge",
                     "transition_condition": {
                         "type": "prompt",
@@ -362,15 +431,15 @@
                 "tool_type": "local",
                 "speak_during_execution": true,
                 "display_position": {
-                    "x": 1788.456245767616,
-                    "y": 685.7250058938187
+                    "x": 1919.5627286456133,
+                    "y": 805.7524536720878
                 },
                 "wait_for_result": true
             },
             {
                 "instruction": {
                     "type": "prompt",
-                    "text": "You are handling a FREE redo appointment. This is at NO CHARGE to the customer - make that clear.\n\nSTEP 1: Ask: 'Do you have your order ID or confirmation number from the original service?' If not, say: 'No problem, I can look it up with your phone number.' Use their phone number as the order_id if they don't have one.\n\nSTEP 2: Ask them to briefly describe the issue in one sentence. Be empathetic: 'I'm sorry you experienced that.'\n\nSTEP 3: As soon as you have BOTH the order_id and issue_description, immediately call the book_redo_appointment tool. Do NOT ask any more questions before calling it.\n\nON SUCCESS: Say: 'I've scheduled your free return visit for [date and time] at [address]. The same technician will be back to take care of this at no charge. Is there anything else I can help with?' Then transition to End Call.\n\nON FAILURE (tool error): Say: 'I'm having a little trouble pulling that up right now. Let me connect you with a team member who can get this sorted out for you right away.' Then transfer immediately. Do NOT retry."
+                    "text": "You are handling a FREE redo appointment. This is at NO CHARGE to the customer - make that clear.\n\nSTEP 1: Ask: 'Do you have your order ID or confirmation number from the original service?' If not, say: 'No problem, I can look it up with your phone number.'\n\nSTEP 2: Ask them to briefly describe the issue. Be empathetic: 'I'm sorry you experienced that.'\n\nSTEP 3: Call the book_redo_appointment tool with the order_id (or phone number) and their issue_description.\n\nON SUCCESS: Read back the redo details: 'I've scheduled your free return visit for [date and time] at [address]. The same technician will be coming back to take care of this for you at no charge.'\n\nON ERROR: Say: 'I'm having trouble scheduling that right now. Let me connect you with someone who can help.' Then transfer to human.\n\nNever charge the customer for a redo. Always emphasize it's free."
                 },
                 "model_choice": {
                     "type": "cascading",
@@ -392,8 +461,8 @@
                 "knowledge_base_ids": [],
                 "type": "conversation",
                 "display_position": {
-                    "x": 1108.3577402678966,
-                    "y": 1121.794796244816
+                    "x": 1487.8945780092224,
+                    "y": 1125.3236973142712
                 }
             },
             {
@@ -413,8 +482,8 @@
                 "tool_type": "local",
                 "speak_during_execution": true,
                 "display_position": {
-                    "x": 1609.1551590004196,
-                    "y": 1168.0161456544927
+                    "x": 2005.04378965452,
+                    "y": 1113.153814809799
                 },
                 "wait_for_result": true
             },
@@ -435,8 +504,8 @@
                 "tool_type": "local",
                 "speak_during_execution": true,
                 "display_position": {
-                    "x": 1245.0,
-                    "y": 500.0
+                    "x": 1396.4705725088347,
+                    "y": 637.8784041588513
                 },
                 "wait_for_result": true
             },
@@ -466,8 +535,8 @@
                 "tool_type": "local",
                 "speak_during_execution": false,
                 "display_position": {
-                    "x": 770.0,
-                    "y": 800.0
+                    "x": 771.4697344922756,
+                    "y": 841.1525657837168
                 },
                 "wait_for_result": true
             },
@@ -504,14 +573,44 @@
                 "knowledge_base_ids": [],
                 "type": "conversation",
                 "display_position": {
-                    "x": 770.0,
-                    "y": 1000.0
+                    "x": 1110.7841999965128,
+                    "y": 1127.835259998954
                 }
             }
         ],
         "start_node_id": "start-node-1770283118544",
         "start_speaker": "agent",
         "tools": [
+            {
+                "headers": {},
+                "parameter_type": "json",
+                "method": "POST",
+                "query_params": {},
+                "description": "Checks whether a zip code is within the United Home Services coverage area (greater Charlotte, NC metro). Call this first before any service discussion.",
+                "type": "custom",
+                "url": "https://aisystem.unitedhomecarolina.com/api/appointments/verify-zip",
+                "tool_id": "tool-verify-zip",
+                "args_at_root": true,
+                "timeout_ms": 10000,
+                "name": "verify_zip",
+                "response_variables": {
+                    "serviced": "$.serviced",
+                    "zip_city": "$.city",
+                    "zip_message": "$.message"
+                },
+                "parameters": {
+                    "type": "object",
+                    "required": [
+                        "zip_code"
+                    ],
+                    "properties": {
+                        "zip_code": {
+                            "type": "string",
+                            "description": "The 5-digit zip code provided by the customer."
+                        }
+                    }
+                }
+            },
             {
                 "headers": {},
                 "parameter_type": "json",
@@ -525,12 +624,9 @@
                 "timeout_ms": 20000,
                 "name": "verify_address",
                 "response_variables": {
-                    "verified": "$.verified",
                     "formatted_address": "$.formatted_address",
                     "latitude": "$.latitude",
-                    "longitude": "$.longitude",
-                    "low_confidence": "$.low_confidence",
-                    "address_message": "$.message"
+                    "longitude": "$.longitude"
                 },
                 "parameters": {
                     "type": "object",
@@ -558,11 +654,11 @@
                 "timeout_ms": 20000,
                 "name": "check_technician_availability",
                 "response_variables": {
-                    "technician_id": "$.technician.id",
-                    "technician_name": "$.technician.name",
-                    "time_slot": "$.time_slot",
                     "available": "$.available",
-                    "availability_message": "$.message"
+                    "technician_id": "$.technician.id",
+                    "availability_message": "$.message",
+                    "technician_name": "$.technician.name",
+                    "time_slot": "$.time_slot"
                 },
                 "parameters": {
                     "type": "object",
@@ -575,14 +671,14 @@
                     "properties": {
                         "service_type": {
                             "type": "string",
+                            "description": "The service type. Must be one of: chimney, dryer_vent, gutter, power_washing, air_duct.",
                             "enum": [
                                 "chimney",
                                 "dryer_vent",
                                 "gutter",
                                 "power_washing",
                                 "air_duct"
-                            ],
-                            "description": "The service type. Must be one of: chimney, dryer_vent, gutter, power_washing, air_duct."
+                            ]
                         },
                         "confirmed_latitude": {
                             "type": "number",
@@ -612,8 +708,8 @@
                 "timeout_ms": 20000,
                 "name": "book_appointment",
                 "response_variables": {
-                    "appointment_id": "$.appointment_id",
-                    "message": "$.message"
+                    "message": "$.message",
+                    "appointment_id": "$.appointment_id"
                 },
                 "parameters": {
                     "type": "object",
@@ -627,50 +723,25 @@
                         "latitude",
                         "longitude",
                         "start_time",
-                        "duration_minutes",
-                        "quoted_price"
+                        "duration_minutes"
                     ],
                     "properties": {
-                        "customer_name": {
+                        "start_time": {
                             "type": "string",
-                            "description": ""
-                        },
-                        "customer_phone": {
-                            "type": "string",
-                            "description": ""
-                        },
-                        "customer_email": {
-                            "type": "string",
-                            "description": ""
-                        },
-                        "technician_id": {
-                            "type": "number",
                             "description": ""
                         },
                         "service_type": {
                             "type": "string",
+                            "description": "The service type. Must be one of: chimney, dryer_vent, gutter, power_washing, air_duct.",
                             "enum": [
                                 "chimney",
                                 "dryer_vent",
                                 "gutter",
                                 "power_washing",
                                 "air_duct"
-                            ],
-                            "description": "The service type. Must be one of: chimney, dryer_vent, gutter, power_washing, air_duct."
+                            ]
                         },
                         "address": {
-                            "type": "string",
-                            "description": ""
-                        },
-                        "latitude": {
-                            "type": "number",
-                            "description": ""
-                        },
-                        "longitude": {
-                            "type": "number",
-                            "description": ""
-                        },
-                        "start_time": {
                             "type": "string",
                             "description": ""
                         },
@@ -678,13 +749,29 @@
                             "type": "number",
                             "description": ""
                         },
-                        "quoted_price": {
-                            "type": "number",
-                            "description": "The final price the customer agreed to, after any discounts."
-                        },
-                        "discount_applied": {
+                        "customer_email": {
                             "type": "string",
-                            "description": "Description of discount given, e.g. 'veteran 10%', 'senior 10%', 'manager 10%', or 'none'."
+                            "description": ""
+                        },
+                        "latitude": {
+                            "type": "number",
+                            "description": ""
+                        },
+                        "customer_phone": {
+                            "type": "string",
+                            "description": ""
+                        },
+                        "technician_id": {
+                            "type": "number",
+                            "description": ""
+                        },
+                        "customer_name": {
+                            "type": "string",
+                            "description": ""
+                        },
+                        "longitude": {
+                            "type": "number",
+                            "description": ""
                         }
                     }
                 }
@@ -708,13 +795,13 @@
                         "phone_number"
                     ],
                     "properties": {
-                        "phone_number": {
-                            "type": "string",
-                            "description": "The user's phone number to identify the booking."
-                        },
                         "cancellation_reason": {
                             "type": "string",
                             "description": "The reason why the user wants to cancel (optional)."
+                        },
+                        "phone_number": {
+                            "type": "string",
+                            "description": "The user's phone number to identify the booking."
                         }
                     }
                 }
@@ -764,13 +851,12 @@
                 "name": "get_current_datetime",
                 "response_variables": {
                     "current_date": "$.current_date",
-                    "current_time": "$.current_time",
                     "iso_date": "$.iso_date",
+                    "current_time": "$.current_time",
                     "day_of_week": "$.day_of_week"
                 },
                 "parameters": {
                     "type": "object",
-                    "required": [],
                     "properties": {}
                 }
             },
@@ -792,7 +878,6 @@
                 },
                 "parameters": {
                     "type": "object",
-                    "required": [],
                     "properties": {}
                 }
             }

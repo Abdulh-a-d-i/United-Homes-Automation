@@ -377,3 +377,119 @@ async def delete_user_endpoint(
     except Exception as e:
         logging.error(f"Delete user error: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete user")
+
+
+# ---------------------------------------------------------------------------
+# Admin calendar endpoints
+# ---------------------------------------------------------------------------
+
+_admin_oauth_state_store = {}
+
+
+@router.get("/calendar/google/connect")
+async def admin_calendar_google_connect(current_user: dict = Depends(require_admin)):
+    import uuid
+    from fastapi.responses import JSONResponse
+    from google_auth_oauthlib.flow import Flow
+
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    redirect_uri = os.getenv("ADMIN_GOOGLE_REDIRECT_URI", os.getenv("GOOGLE_REDIRECT_URI", ""))
+    scopes = ["https://www.googleapis.com/auth/calendar"]
+
+    flow = Flow.from_client_config(
+        {"web": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uris": [redirect_uri],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }},
+        scopes=scopes,
+        redirect_uri=redirect_uri,
+    )
+    auth_url, state = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent",
+    )
+    _admin_oauth_state_store[state] = {"admin_id": current_user["id"]}
+    return JSONResponse(status_code=200, content={"success": True, "auth_url": auth_url})
+
+
+@router.get("/calendar/google/callback")
+async def admin_calendar_google_callback(
+    code: str,
+    state: str,
+):
+    from fastapi.responses import RedirectResponse
+    from google_auth_oauthlib.flow import Flow
+    from src.utils.db import save_admin_calendar_credentials
+
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    redirect_uri = os.getenv("ADMIN_GOOGLE_REDIRECT_URI", os.getenv("GOOGLE_REDIRECT_URI", ""))
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    scopes = ["https://www.googleapis.com/auth/calendar"]
+
+    state_data = _admin_oauth_state_store.pop(state, None)
+    if not state_data:
+        return RedirectResponse(url=f"{frontend_url}/admin/calendar?status=error&reason=invalid_state")
+
+    try:
+        flow = Flow.from_client_config(
+            {"web": {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uris": [redirect_uri],
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+            }},
+            scopes=scopes,
+            redirect_uri=redirect_uri,
+        )
+        flow.fetch_token(code=code)
+        credentials = flow.credentials
+
+        calendar_email = ""
+        try:
+            from googleapiclient.discovery import build
+            svc = build("oauth2", "v2", credentials=credentials)
+            calendar_email = svc.userinfo().get().execute().get("email", "")
+        except Exception:
+            pass
+
+        creds_dict = {
+            "access_token": credentials.token,
+            "refresh_token": credentials.refresh_token,
+            "token_expiry": credentials.expiry.isoformat() if credentials.expiry else None,
+            "scopes": list(credentials.scopes) if credentials.scopes else scopes,
+        }
+        save_admin_calendar_credentials("google", calendar_email, creds_dict)
+        return RedirectResponse(url=f"{frontend_url}/admin/calendar?status=connected")
+    except Exception as e:
+        logging.error(f"Admin calendar callback error: {e}")
+        traceback.print_exc()
+        return RedirectResponse(url=f"{frontend_url}/admin/calendar?status=error")
+
+
+@router.get("/calendar/status")
+async def admin_calendar_status(current_user: dict = Depends(require_admin)):
+    from src.utils.db import get_admin_calendar_credentials
+    creds = get_admin_calendar_credentials()
+    return JSONResponse(status_code=200, content={
+        "success": True,
+        "data": {
+            "connected": bool(creds and creds.get("connected")),
+            "provider": creds.get("provider") if creds else None,
+            "email": creds.get("email") if creds else None,
+        }
+    })
+
+
+@router.post("/calendar/disconnect")
+async def admin_calendar_disconnect(current_user: dict = Depends(require_admin)):
+    from src.utils.db import disconnect_admin_calendar
+    disconnect_admin_calendar()
+    return JSONResponse(status_code=200, content={"success": True, "message": "Admin calendar disconnected"})
+

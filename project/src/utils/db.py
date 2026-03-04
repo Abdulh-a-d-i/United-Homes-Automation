@@ -134,6 +134,17 @@ def create_tables():
         )
     """)
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS admin_calendar_config (
+            id INTEGER PRIMARY KEY DEFAULT 1,
+            provider VARCHAR(50),
+            email VARCHAR(255),
+            credentials JSONB,
+            connected BOOLEAN DEFAULT FALSE,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     _ensure_schema_migration(cur)
 
     conn.commit()
@@ -141,6 +152,54 @@ def create_tables():
     conn.close()
 
     _seed_admin_user()
+
+
+def save_admin_calendar_credentials(provider, email, creds_dict):
+    import json
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            INSERT INTO admin_calendar_config (id, provider, email, credentials, connected, updated_at)
+            VALUES (1, %s, %s, %s, TRUE, CURRENT_TIMESTAMP)
+            ON CONFLICT (id) DO UPDATE SET
+                provider = EXCLUDED.provider,
+                email = EXCLUDED.email,
+                credentials = EXCLUDED.credentials,
+                connected = TRUE,
+                updated_at = CURRENT_TIMESTAMP
+        """, (provider, email, json.dumps(creds_dict)))
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_admin_calendar_credentials():
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("SELECT * FROM admin_calendar_config WHERE id = 1")
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        cur.close()
+        conn.close()
+
+
+def disconnect_admin_calendar():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            UPDATE admin_calendar_config
+            SET connected = FALSE, credentials = NULL, provider = NULL, email = NULL
+            WHERE id = 1
+        """)
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
 
 
 def _ensure_schema_migration(cur):
