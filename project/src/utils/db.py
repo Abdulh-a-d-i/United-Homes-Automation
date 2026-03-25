@@ -390,9 +390,18 @@ def create_user_by_admin(user_data, temp_password):
         cur.execute("SELECT id FROM users WHERE email = %s", (user_data["email"],))
         if cur.fetchone():
             raise ValueError("Email already registered")
-        cur.execute("SELECT id FROM users WHERE username = %s", (user_data["username"],))
-        if cur.fetchone():
-            raise ValueError("Username already taken")
+
+        # Auto-generate username from email, deduplicate with suffix if needed
+        base_username = user_data["email"].split("@")[0].lower()
+        username = base_username
+        suffix = 2
+        while True:
+            cur.execute("SELECT id FROM users WHERE username = %s", (username,))
+            if not cur.fetchone():
+                break
+            username = f"{base_username}_{suffix}"
+            suffix += 1
+
         hashed = bcrypt.hashpw(
             temp_password.encode("utf-8"),
             bcrypt.gensalt()
@@ -402,7 +411,7 @@ def create_user_by_admin(user_data, temp_password):
             VALUES (%s, %s, %s, %s, %s, %s)
             RETURNING id, username, email, first_name, last_name, phone, created_at
         """, (
-            user_data["username"],
+            username,
             user_data["email"],
             hashed,
             user_data.get("first_name"),
@@ -412,14 +421,13 @@ def create_user_by_admin(user_data, temp_password):
         user = cur.fetchone()
 
         if user and user_data.get("skills"):
-            # Normalize skills: split comma-separated strings, trim, lowercase
             raw_skills = user_data["skills"]
             normalized = []
             for s in raw_skills:
-                # Handle "plumber, electrican" -> ["plumber", "electrican"]
                 parts = [p.strip().lower() for p in s.split(",") if p.strip()]
                 normalized.extend(parts)
             skills_json = json.dumps(normalized)
+            tech_name = f"{user_data.get('first_name', '')} {user_data.get('last_name', '')}".strip() or username
             logging.info(f"[USER CREATE] Creating tech for user {user['id']} with skills: {normalized}")
 
             cur.execute("""
@@ -429,14 +437,14 @@ def create_user_by_admin(user_data, temp_password):
                 RETURNING id
             """, (
                 user["id"],
-                f"{user_data.get('first_name', '')} {user_data.get('last_name', '')}".strip() or user_data["username"],
+                tech_name,
                 user_data["email"],
                 user_data.get("phone"),
                 skills_json,
                 user_data.get("home_latitude"),
                 user_data.get("home_longitude"),
                 user_data.get("home_address"),
-                50  # default max radius miles
+                50
             ))
             tech_id = cur.fetchone()
             logging.info(f"[USER CREATE] Created technician id={tech_id['id'] if tech_id else 'unknown'} for user {user['id']}")

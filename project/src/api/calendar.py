@@ -13,6 +13,7 @@ from src.utils.db import (
 )
 from src.services.google_calendar import GoogleCalendarService
 from src.services.outlook_calendar import OutlookCalendarService
+from src.utils.jwt_utils import create_oauth_state_token, verify_oauth_state_token
 from dotenv import load_dotenv
 import msal
 
@@ -31,7 +32,6 @@ MICROSOFT_TENANT_ID = os.getenv("MICROSOFT_TENANT_ID", "common")
 MICROSOFT_REDIRECT_URI = os.getenv("MICROSOFT_REDIRECT_URI")
 MICROSOFT_SCOPES = ["Calendars.ReadWrite", "User.Read"]
 
-_oauth_state_store = {}
 
 
 @router.get("/google/connect")
@@ -53,16 +53,16 @@ async def google_connect(current_user: dict = Depends(get_current_user)):
             scopes=GOOGLE_SCOPES,
             redirect_uri=GOOGLE_REDIRECT_URI
         )
-        auth_url, state = flow.authorization_url(
+        auth_url, _ = flow.authorization_url(
             access_type="offline",
             include_granted_scopes="true",
-            prompt="consent"
+            prompt="consent",
+            state=create_oauth_state_token({
+                "user_id": current_user["id"],
+                "tech_id": tech["id"],
+                "provider": "google"
+            })
         )
-        _oauth_state_store[state] = {
-            "user_id": current_user["id"],
-            "tech_id": tech["id"],
-            "provider": "google"
-        }
         return JSONResponse(
             status_code=200,
             content={"success": True, "auth_url": auth_url}
@@ -78,9 +78,9 @@ async def google_connect(current_user: dict = Depends(get_current_user)):
 @router.get("/google/callback")
 async def google_callback(code: str = Query(...), state: str = Query(...)):
     try:
-        state_data = _oauth_state_store.pop(state, None)
+        state_data = verify_oauth_state_token(state)
         if not state_data:
-            raise HTTPException(status_code=400, detail="Invalid OAuth state")
+            raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
 
         flow = Flow.from_client_config(
             {
@@ -137,18 +137,16 @@ async def outlook_connect(current_user: dict = Depends(get_current_user)):
             authority=f"https://login.microsoftonline.com/{MICROSOFT_TENANT_ID}",
             client_credential=MICROSOFT_CLIENT_SECRET
         )
-        import uuid
-        state = str(uuid.uuid4())
-        auth_url = app.get_authorization_request_url(
-            MICROSOFT_SCOPES,
-            redirect_uri=MICROSOFT_REDIRECT_URI,
-            state=state
-        )
-        _oauth_state_store[state] = {
+        state_token = create_oauth_state_token({
             "user_id": current_user["id"],
             "tech_id": tech["id"],
             "provider": "outlook"
-        }
+        })
+        auth_url = app.get_authorization_request_url(
+            MICROSOFT_SCOPES,
+            redirect_uri=MICROSOFT_REDIRECT_URI,
+            state=state_token
+        )
         return JSONResponse(
             status_code=200,
             content={"success": True, "auth_url": auth_url}
@@ -164,9 +162,9 @@ async def outlook_connect(current_user: dict = Depends(get_current_user)):
 @router.get("/outlook/callback")
 async def outlook_callback(code: str = Query(...), state: str = Query(...)):
     try:
-        state_data = _oauth_state_store.pop(state, None)
+        state_data = verify_oauth_state_token(state)
         if not state_data:
-            raise HTTPException(status_code=400, detail="Invalid OAuth state")
+            raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
 
         app = msal.ConfidentialClientApplication(
             MICROSOFT_CLIENT_ID,

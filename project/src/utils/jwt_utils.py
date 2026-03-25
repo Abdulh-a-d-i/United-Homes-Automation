@@ -43,3 +43,20 @@ def verify_password_reset_token(token: str):
         return email
     except JWTError:
         return None
+
+
+def create_oauth_state_token(data: dict, expires_delta: timedelta = timedelta(minutes=15)):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + expires_delta
+    to_encode.update({"exp": expire, "type": "oauth_state"})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def verify_oauth_state_token(token: str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("type") != "oauth_state":
+            return None
+        return payload
+    except JWTError:
+        return None

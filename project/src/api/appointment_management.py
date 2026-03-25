@@ -152,9 +152,8 @@ async def my_next_day_schedule(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Technicians only see their NEXT DAY schedule.
-    Schedule is released at 6:00 PM the prior day.
-    Before 6 PM, returns empty with a message.
+    Technicians see today's full schedule + tomorrow's schedule at all times.
+    Sorted chronologically by start_time.
     """
     try:
         tech = get_technician_by_user_id(current_user["id"])
@@ -164,31 +163,20 @@ async def my_next_day_schedule(
         from zoneinfo import ZoneInfo
         eastern = ZoneInfo("America/New_York")
         now = datetime.now(eastern)
-        cutoff_time = now.replace(hour=18, minute=0, second=0, microsecond=0)
 
-        if now < cutoff_time:
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "success": True,
-                    "schedule_available": False,
-                    "message": "Your schedule for tomorrow will be available at 6:00 PM ET today.",
-                    "available_at": str(cutoff_time),
-                    "data": {}
-                }
-            )
-
+        today = now.date()
         tomorrow = (now + timedelta(days=1)).date()
-        tomorrow_start = datetime.combine(tomorrow, datetime.min.time())
-        tomorrow_end = datetime.combine(tomorrow, datetime.max.time())
+
+        # Fetch today + tomorrow window
+        window_start = datetime.combine(today, datetime.min.time())
+        window_end = datetime.combine(tomorrow, datetime.max.time())
 
         result = get_appointments_paginated(
             page=1,
-            page_size=50,
+            page_size=100,
             technician_id=tech["id"],
-            date_from=str(tomorrow_start),
-            date_to=str(tomorrow_end),
-            time_filter="upcoming"
+            date_from=str(window_start),
+            date_to=str(window_end),
         )
 
         appointments_out = {}
@@ -212,6 +200,10 @@ async def my_next_day_schedule(
                     "longitude": float(a["longitude"]) if a.get("longitude") else None
                 },
                 "status": a["status"],
+                "pricing": {
+                    "quoted_price": float(a["quoted_price"]) if a.get("quoted_price") else None,
+                    "discount_applied": a.get("discount_applied")
+                },
                 "notes": a.get("notes")
             }
 
@@ -220,7 +212,7 @@ async def my_next_day_schedule(
             content={
                 "success": True,
                 "schedule_available": True,
-                "schedule_date": str(tomorrow),
+                "schedule_date": str(today),
                 "total_appointments": len(appointments_out),
                 "data": appointments_out
             }
@@ -230,6 +222,7 @@ async def my_next_day_schedule(
     except Exception as e:
         logging.error(f"My schedule error: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch schedule")
+
 
 
 

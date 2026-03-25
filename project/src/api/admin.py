@@ -103,7 +103,6 @@ async def create_user(
         temp_password = _generate_temp_password()
         user = create_user_by_admin(
             {
-                "username": request.username.lower().strip(),
                 "email": request.email.lower().strip(),
                 "first_name": request.first_name,
                 "last_name": request.last_name,
@@ -383,7 +382,7 @@ async def delete_user_endpoint(
 # Admin calendar endpoints
 # ---------------------------------------------------------------------------
 
-_admin_oauth_state_store = {}
+# No global state store needed for stateless OAuth
 
 
 @router.get("/calendar/google/connect")
@@ -408,12 +407,13 @@ async def admin_calendar_google_connect(current_user: dict = Depends(require_adm
         scopes=scopes,
         redirect_uri=redirect_uri,
     )
-    auth_url, state = flow.authorization_url(
+    from src.utils.jwt_utils import create_oauth_state_token
+    auth_url, _ = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
         prompt="consent",
+        state=create_oauth_state_token({"admin_id": current_user["id"]})
     )
-    _admin_oauth_state_store[state] = {"admin_id": current_user["id"]}
     return JSONResponse(status_code=200, content={"success": True, "auth_url": auth_url})
 
 
@@ -432,7 +432,9 @@ async def admin_calendar_google_callback(
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
     scopes = ["https://www.googleapis.com/auth/calendar"]
 
-    state_data = _admin_oauth_state_store.pop(state, None)
+    from src.utils.jwt_utils import verify_oauth_state_token
+
+    state_data = verify_oauth_state_token(state)
     if not state_data:
         return RedirectResponse(url=f"{frontend_url}/admin/calendar?status=error&reason=invalid_state")
 
